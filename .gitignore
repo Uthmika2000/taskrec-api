@@ -1,0 +1,47 @@
+# ─── Environment files (NEVER commit secrets) ──────────────────────────────────
+.env
+.env.local
+server/.env
+ml-service/.env
+
+# ─── Node / npm ────────────────────────────────────────────────────────────────
+node_modules/
+server/node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ─── Build outputs ─────────────────────────────────────────────────────────────
+server/coverage/
+coverage/
+.nyc_output/
+
+# ─── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+ml-service/venv/
+ml-service/.venv/
+ml-service/env/
+*.egg-info/
+
+# ─── ML models & large data files ─────────────────────────────────────────────
+ml-service/models/
+ml-service/data/so_survey/
+*.pkl
+*.joblib
+*.pt
+*.pth
+*.bin
+
+# ─── Logs ──────────────────────────────────────────────────────────────────────
+*.log
+logs/
+
+# ─── OS / Editor ───────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.idea/
+.vscode/settings.json
