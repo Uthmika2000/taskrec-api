@@ -1,7 +1,7 @@
 const express = require('express');
 const { body } = require('express-validator');
 const router = express.Router();
-const { register, login, getMe, logout } = require('../controllers/authController');
+const { register, login, getMe, logout, forgotPassword, resetPassword } = require('../controllers/authController');
 const { authMiddleware } = require('../middleware/authMiddleware');
 const validate = require('../middleware/validate');
 const { AUTH, ROLES } = require('../constants');
@@ -44,5 +44,21 @@ router.get('/me', authMiddleware, getMe);
 
 // POST /api/auth/logout
 router.post('/logout', logout);
+
+// POST /api/auth/forgot-password
+router.post('/forgot-password', [emailRule], validate, forgotPassword);
+
+// POST /api/auth/reset-password
+router.post(
+  '/reset-password',
+  [
+    emailRule,
+    body('token').isString().isLength({ min: 16, max: 128 }),
+    body('newPassword').isString().isLength({ min: AUTH.PASSWORD_MIN_LENGTH, max: 128 })
+      .withMessage(`Password must be at least ${AUTH.PASSWORD_MIN_LENGTH} characters`),
+  ],
+  validate,
+  resetPassword,
+);
 
 module.exports = router;

@@ -12,6 +12,8 @@ const userSchema = new mongoose.Schema(
     preferredTaskTypes: [{ type: String, enum: ['Backend', 'Frontend', 'DevOps', 'QA', 'Database'], trim: true }],
     teamIds: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Team' }],
     isActive: { type: Boolean, default: true },
+    resetToken: { type: String, default: null, select: false },
+    resetTokenExpires: { type: Date, default: null, select: false },
     preferences: {
       type: mongoose.Schema.Types.Mixed,
       default: {

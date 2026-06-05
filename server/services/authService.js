@@ -1,6 +1,9 @@
+const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const { AUTH } = require('../constants');
+
+const RESET_TOKEN_TTL_MS = 15 * 60 * 1000;
 
 function buildToken(userId) {
   return jwt.sign({ userId }, process.env.JWT_SECRET, { expiresIn: AUTH.TOKEN_EXPIRY });
@@ -75,4 +78,61 @@ async function login(email, password) {
   return { user: userPayload(user), token };
 }
 
-module.exports = { register, login, userPayload, buildToken };
+async function forgotPassword(email) {
+  if (!email) {
+    const err = new Error('Email is required.');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const user = await User.findOne({ email: email.toLowerCase() });
+  if (!user) {
+    // Don't leak account existence — return generic success but no token
+    return { token: null };
+  }
+
+  const token = crypto.randomBytes(24).toString('hex');
+  user.resetToken = token;
+  user.resetTokenExpires = new Date(Date.now() + RESET_TOKEN_TTL_MS);
+  await user.save();
+
+  // No email infrastructure — return the token so the FE can display it in dev.
+  // In production this would be emailed and the response would not include the token.
+  return { token };
+}
+
+async function resetPassword(email, token, newPassword) {
+  if (!email || !token || !newPassword) {
+    const err = new Error('Email, token and new password are required.');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  if (newPassword.length < AUTH.PASSWORD_MIN_LENGTH) {
+    const err = new Error(`New password must be at least ${AUTH.PASSWORD_MIN_LENGTH} characters.`);
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const user = await User.findOne({ email: email.toLowerCase() })
+    .select('+resetToken +resetTokenExpires +passwordHash');
+
+  if (!user || !user.resetToken || user.resetToken !== token) {
+    const err = new Error('Invalid or expired reset token.');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  if (!user.resetTokenExpires || user.resetTokenExpires.getTime() < Date.now()) {
+    const err = new Error('Invalid or expired reset token.');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  user.passwordHash = newPassword;
+  user.resetToken = null;
+  user.resetTokenExpires = null;
+  await user.save();
+}
+
+module.exports = { register, login, userPayload, buildToken, forgotPassword, resetPassword };

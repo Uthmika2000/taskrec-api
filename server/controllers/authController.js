@@ -48,4 +48,25 @@ const logout = (req, res) => {
   return res.json({ success: true, message: 'Logged out successfully.' });
 };
 
-module.exports = { register, login, getMe, logout };
+// @route   POST /api/auth/forgot-password
+// @access  Public
+const forgotPassword = async (req, res, next) => {
+  try {
+    const { token } = await authService.forgotPassword(req.body.email);
+    const data = { message: 'If an account with that email exists, a reset code has been issued.' };
+    // Dev-only: expose the token so the user can complete reset without an email service.
+    if (process.env.NODE_ENV !== 'production' && token) data.devToken = token;
+    return res.json({ success: true, data });
+  } catch (error) { handleError(error, res, next); }
+};
+
+// @route   POST /api/auth/reset-password
+// @access  Public
+const resetPassword = async (req, res, next) => {
+  try {
+    await authService.resetPassword(req.body.email, req.body.token, req.body.newPassword);
+    return res.json({ success: true, message: 'Password reset successfully. You can now sign in.' });
+  } catch (error) { handleError(error, res, next); }
+};
+
+module.exports = { register, login, getMe, logout, forgotPassword, resetPassword };
