@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const logger = require('../utils/logger');
 
 const connectDB = async () => {
   try {
@@ -10,11 +11,9 @@ const connectDB = async () => {
       retryWrites: true,
       w: 'majority',
     });
-    console.log(`✅ MongoDB Connected: ${conn.connection.host}`);
+    logger.info('mongodb connected', { host: conn.connection.host });
   } catch (error) {
-    console.error(`❌ MongoDB connection error: ${error.message}`);
-    console.error(`Full error:`, error);
-    // Exit process on production
+    logger.error('mongodb connection failed', { message: error.message });
     if (process.env.NODE_ENV === 'production') {
       process.exit(1);
     }
@@ -22,11 +21,11 @@ const connectDB = async () => {
 };
 
 mongoose.connection.on('disconnected', () => {
-  console.log('⚠️  MongoDB disconnected');
+  logger.warn('mongodb disconnected');
 });
 
 mongoose.connection.on('error', (err) => {
-  console.error(`MongoDB error: ${err}`);
+  logger.error('mongodb error', { message: err.message });
 });
 
 module.exports = connectDB;
