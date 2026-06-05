@@ -1,47 +1,64 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
+const helmet = require('helmet');
 const cookieParser = require('cookie-parser');
 const rateLimit = require('express-rate-limit');
 const connectDB = require('./config/db');
 const errorHandler = require('./middleware/errorHandler');
+const logger = require('./utils/logger');
 
 const app = express();
 
 // ─── Connect to MongoDB ───────────────────────────────────────────────────────
 connectDB();
 
-// ─── Middleware ──────────────────────────────────────────────────────────────
+// ─── Security headers ─────────────────────────────────────────────────────────
+app.use(helmet());
+
+// ─── CORS ─────────────────────────────────────────────────────────────────────
+const devOrigins = [
+  'http://localhost:5000',
+  'http://127.0.0.1:5000',
+  'http://localhost:3000',
+  'http://127.0.0.1:3000',
+  'http://localhost:5173',
+  'http://127.0.0.1:5173',
+];
+
+const prodOrigins = (process.env.CLIENT_URL || '')
+  .split(',')
+  .map(s => s.trim())
+  .filter(Boolean);
+
 app.use(cors({
-  origin: process.env.NODE_ENV === 'production'
-    ? process.env.CLIENT_URL
-    : [
-      'http://localhost:5000', 
-      'http://127.0.0.1:5000',
-      'http://localhost:3000',   // Docker client port
-      'http://127.0.0.1:3000', 
-      'http://localhost:5173',   // Vite local dev port
-      'http://127.0.0.1:5173'   // Docker client port
-    ],
+  origin: process.env.NODE_ENV === 'production' ? prodOrigins : devOrigins,
   credentials: true,
 }));
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: '1mb' }));
+app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 app.use(cookieParser());
 
-// Rate limiter - more permissive for development
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 1000, // Increased from 100 to 1000 requests per 15 min
+// ─── Rate limiters ────────────────────────────────────────────────────────────
+const generalLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 300,
   standardHeaders: true,
   legacyHeaders: false,
   message: { success: false, message: 'Too many requests, please try again later.' },
-  skip: (req) => {
-    // Skip rate limiting for health check
-    return req.path === '/health';
-  },
+  skip: (req) => req.path === '/health',
 });
-app.use('/api', limiter);
+
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, message: 'Too many auth attempts, please try again later.' },
+});
+
+app.use('/api/auth', authLimiter);
+app.use('/api', generalLimiter);
 
 // ─── Health check ─────────────────────────────────────────────────────────────
 app.get('/health', (req, res) => {
@@ -70,11 +87,13 @@ app.use((req, res) => {
 });
 
 // ─── Start Server ─────────────────────────────────────────────────────────────
+// Skip auto-listen under Jest so test suites can `require('./server')` without
+// binding the port (tests use supertest against the exported app).
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
-  console.log(`📦 MongoDB: ${process.env.MONGO_URI}`);
-  console.log(`🤖 ML Service: ${process.env.ML_SERVICE_URL}`);
-});
+if (process.env.NODE_ENV !== 'test' && !process.env.JEST_WORKER_ID) {
+  app.listen(PORT, () => {
+    logger.info('server started', { port: PORT, env: process.env.NODE_ENV || 'development' });
+  });
+}
 
 module.exports = app;
