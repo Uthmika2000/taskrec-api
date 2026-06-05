@@ -73,6 +73,30 @@ async function getWorkload(sprintId) {
   };
 }
 
+async function getDeveloperWorkload(developerId, sprintId) {
+  if (!sprintId) {
+    const sprint = await Sprint.findOne({ status: 'ACTIVE' }).sort({ startDate: -1 });
+    if (!sprint) {
+      return { assignedPoints: 0, capacity: 0, utilizationPercent: 0, sprintId: null };
+    }
+    sprintId = sprint._id;
+  }
+
+  const sprint = await Sprint.findById(sprintId).select('_id capacityPoints');
+  if (!sprint) {
+    const err = new Error('Sprint not found.');
+    err.statusCode = 404;
+    throw err;
+  }
+
+  const tasks = await Task.find({ sprintId, assigneeId: developerId }).select('storyPoints');
+  const assignedPoints = tasks.reduce((s, t) => s + (t.storyPoints || 0), 0);
+  const capacity = sprint.capacityPoints || 0;
+  const utilizationPercent = capacity > 0 ? Math.round((assignedPoints / capacity) * 100) : 0;
+
+  return { assignedPoints, capacity, utilizationPercent, sprintId: sprint._id };
+}
+
 async function getAccuracy() {
   const mlServiceUrl = process.env.ML_SERVICE_URL || 'http://localhost:8000';
 
@@ -184,4 +208,4 @@ async function getEvaluation() {
   };
 }
 
-module.exports = { getWorkload, getAccuracy, getEvaluation };
+module.exports = { getWorkload, getDeveloperWorkload, getAccuracy, getEvaluation };
