@@ -59,6 +59,26 @@ async function updateUser(targetUserId, body, requestingUser) {
   if (Array.isArray(body.skillTags)) updates.skillTags = body.skillTags;
   if (Array.isArray(body.preferredTaskTypes)) updates.preferredTaskTypes = body.preferredTaskTypes;
 
+  // Admin-only fields
+  if (isAdmin) {
+    if (typeof body.role === 'string' && ['admin', 'scrum_master', 'developer'].includes(body.role)) {
+      if (isSelf && body.role !== 'admin') {
+        const err = new Error('Cannot demote yourself from admin.');
+        err.statusCode = 400;
+        throw err;
+      }
+      updates.role = body.role;
+    }
+    if (typeof body.isActive === 'boolean') {
+      if (isSelf && body.isActive === false) {
+        const err = new Error('Cannot deactivate your own account.');
+        err.statusCode = 400;
+        throw err;
+      }
+      updates.isActive = body.isActive;
+    }
+  }
+
   if (Object.keys(updates).length === 0) {
     const err = new Error('No valid fields to update.');
     err.statusCode = 400;
