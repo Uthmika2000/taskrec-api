@@ -1,9 +1,5 @@
 const teamService = require('../services/teamService');
-
-function handleError(error, res, next) {
-  if (error.statusCode) return res.status(error.statusCode).json({ success: false, message: error.message });
-  next(error);
-}
+const handleError = require('../utils/handleError');
 
 // @route   POST /api/teams
 // @access  Private (Admin, Scrum Master)

@@ -1,5 +1,6 @@
 const authService = require('../services/authService');
 const { AUTH } = require('../constants');
+const handleError = require('../utils/handleError');
 
 function setTokenCookie(res, token) {
   res.cookie('token', token, {
@@ -8,11 +9,6 @@ function setTokenCookie(res, token) {
     sameSite: 'lax',
     maxAge:   AUTH.COOKIE_MAX_AGE,
   });
-}
-
-function handleError(error, res, next) {
-  if (error.statusCode) return res.status(error.statusCode).json({ success: false, message: error.message });
-  next(error);
 }
 
 // @route   POST /api/auth/register

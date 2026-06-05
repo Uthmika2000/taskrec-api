@@ -1,9 +1,5 @@
 const notificationService = require('../services/notificationService');
-
-function handleError(error, res, next) {
-  if (error.statusCode) return res.status(error.statusCode).json({ success: false, message: error.message });
-  next(error);
-}
+const handleError = require('../utils/handleError');
 
 exports.listNotifications = async (req, res, next) => {
   try {

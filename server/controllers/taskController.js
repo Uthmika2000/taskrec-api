@@ -1,9 +1,5 @@
 const taskService = require('../services/taskService');
-
-function handleError(error, res, next) {
-  if (error.statusCode) return res.status(error.statusCode).json({ success: false, message: error.message });
-  next(error);
-}
+const handleError = require('../utils/handleError');
 
 // @route   POST /api/tasks
 // @access  Private

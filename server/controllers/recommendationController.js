@@ -1,9 +1,5 @@
 const recommendationService = require('../services/recommendationService');
-
-function handleError(error, res, next) {
-  if (error.statusCode) return res.status(error.statusCode).json({ success: false, message: error.message });
-  next(error);
-}
+const handleError = require('../utils/handleError');
 
 // @route   GET /api/recommend/:taskId
 // @route   POST /api/recommendations/task/:taskId  (legacy)

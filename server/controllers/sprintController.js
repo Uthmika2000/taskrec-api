@@ -1,9 +1,5 @@
 const sprintService = require('../services/sprintService');
-
-function handleError(error, res, next) {
-  if (error.statusCode) return res.status(error.statusCode).json({ success: false, message: error.message });
-  next(error);
-}
+const handleError = require('../utils/handleError');
 
 // @route   POST /api/sprints
 // @access  Private (admin, scrum_master)
