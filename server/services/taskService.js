@@ -4,6 +4,16 @@ const Assignment = require('../models/Assignment');
 const { getAccessibleTeamIds } = require('../utils/access');
 const { TASK } = require('../constants');
 
+async function assertSprintMutable(sprintId) {
+  const sprint = await Sprint.findById(sprintId).select('status teamId');
+  if (sprint && sprint.status === 'COMPLETED') {
+    const err = new Error('This task belongs to a completed sprint and is read-only.');
+    err.statusCode = 400;
+    throw err;
+  }
+  return sprint;
+}
+
 async function createTask({ title, description, status, priority, storyPoints, sprintId, assigneeId, type, componentLabels }, userId) {
   if (!title || !sprintId || !description) {
     const err = new Error('Title, Sprint ID and description are required');
@@ -103,11 +113,38 @@ async function updateTask(taskId, updates, userId) {
   }
 
   const accessibleTeamIds = await getAccessibleTeamIds(userId);
-  const taskSprint = await Sprint.findById(existing.sprintId).select('teamId');
+  const taskSprint = await Sprint.findById(existing.sprintId).select('teamId status');
   if (!taskSprint || !accessibleTeamIds.includes(taskSprint.teamId.toString())) {
     const err = new Error('Task not found');
     err.statusCode = 404;
     throw err;
+  }
+  if (taskSprint.status === 'COMPLETED') {
+    const err = new Error('This task belongs to a completed sprint and is read-only.');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  // Allow moving a task to a different sprint (TASK-10)
+  if (updates.sprintId && updates.sprintId !== existing.sprintId.toString()) {
+    const targetSprint = await Sprint.findById(updates.sprintId).select('teamId status');
+    if (!targetSprint) {
+      const err = new Error('Target sprint not found');
+      err.statusCode = 404;
+      throw err;
+    }
+    if (!accessibleTeamIds.includes(targetSprint.teamId.toString())) {
+      const err = new Error('Target sprint not found');
+      err.statusCode = 404;
+      throw err;
+    }
+    if (targetSprint.status === 'COMPLETED') {
+      const err = new Error('Cannot move task into a completed sprint.');
+      err.statusCode = 400;
+      throw err;
+    }
+    sanitized.sprintId = updates.sprintId;
+    sanitized.teamId   = targetSprint.teamId;
   }
 
   return Task.findByIdAndUpdate(taskId, sanitized, { new: true })
@@ -124,10 +161,15 @@ async function deleteTask(taskId, userId) {
   }
 
   const accessibleTeamIds = await getAccessibleTeamIds(userId);
-  const taskSprint = await Sprint.findById(task.sprintId).select('teamId');
+  const taskSprint = await Sprint.findById(task.sprintId).select('teamId status');
   if (!taskSprint || !accessibleTeamIds.includes(taskSprint.teamId.toString())) {
     const err = new Error('Task not found');
     err.statusCode = 404;
+    throw err;
+  }
+  if (taskSprint.status === 'COMPLETED') {
+    const err = new Error('Cannot delete a task from a completed sprint.');
+    err.statusCode = 400;
     throw err;
   }
 
@@ -144,10 +186,15 @@ async function assignTask(taskId, assigneeId, userId) {
   }
 
   const accessibleTeamIds = await getAccessibleTeamIds(userId);
-  const taskSprint = await Sprint.findById(task.sprintId).select('teamId');
+  const taskSprint = await Sprint.findById(task.sprintId).select('teamId status');
   if (!taskSprint || !accessibleTeamIds.includes(taskSprint.teamId.toString())) {
     const err = new Error('Task not found');
     err.statusCode = 404;
+    throw err;
+  }
+  if (taskSprint.status === 'COMPLETED') {
+    const err = new Error('Cannot reassign tasks in a completed sprint.');
+    err.statusCode = 400;
     throw err;
   }
 
@@ -175,7 +222,7 @@ async function updateTaskStatus(taskId, status, userId) {
     throw err;
   }
 
-  const existing = await Task.findById(taskId).select('teamId');
+  const existing = await Task.findById(taskId).select('teamId sprintId');
   if (!existing) {
     const err = new Error('Task not found');
     err.statusCode = 404;
@@ -188,6 +235,8 @@ async function updateTaskStatus(taskId, status, userId) {
     err.statusCode = 404;
     throw err;
   }
+
+  await assertSprintMutable(existing.sprintId);
 
   return Task.findByIdAndUpdate(taskId, { status }, { new: true })
     .populate('assigneeId', '-passwordHash')
