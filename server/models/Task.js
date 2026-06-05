@@ -9,7 +9,7 @@ const taskSchema = new mongoose.Schema(
     type: { type: String, enum: ['USER_STORY', 'BUG', 'TASK', 'SUBTASK'], default: 'TASK' },
     storyPoints: { type: Number, default: 1, min: 1, max: 13 },
     priority: { type: String, enum: ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'], default: 'MEDIUM' },
-    status: { type: String, enum: ['TO_DO', 'IN_PROGRESS', 'IN_REVIEW', 'DONE'], default: 'TO_DO' },
+    status: { type: String, enum: ['TO_DO', 'IN_PROGRESS', 'DONE'], default: 'TO_DO' },
     componentLabels: [{ type: String, trim: true }],
     assigneeId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
     reporterId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },

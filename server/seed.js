@@ -138,7 +138,7 @@ async function seedDatabase() {
         description: 'Implement NLP-based task recommendation using sentence transformers and collaborative filtering.',
         storyPoints: 13,
         priority: 'high',
-        status: 'IN_REVIEW',
+        status: 'IN_PROGRESS',
         assigneeId: dev3._id,
         reporterId: scrumMaster._id,
       },

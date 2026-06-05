@@ -82,7 +82,6 @@ async function getSprint(sprintId, userId) {
       remainingCapacity: Math.max(0, sprint.capacityPoints - totalPoints),
       backlog:    tasks.filter(t => t.status === 'TO_DO').length,
       inProgress: tasks.filter(t => t.status === 'IN_PROGRESS').length,
-      review:     tasks.filter(t => t.status === 'IN_REVIEW').length,
       done:       tasks.filter(t => t.status === 'DONE').length,
     },
   };
