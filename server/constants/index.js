@@ -1,7 +1,7 @@
 module.exports = {
   AUTH: {
-    TOKEN_EXPIRY: '7d',
-    COOKIE_MAX_AGE: 7 * 24 * 60 * 60 * 1000,
+    TOKEN_EXPIRY: '24h',
+    COOKIE_MAX_AGE: 24 * 60 * 60 * 1000,
     PASSWORD_MIN_LENGTH: 6,
   },
 
@@ -13,7 +13,7 @@ module.exports = {
 
   TASK: {
     TYPES:    ['USER_STORY', 'BUG', 'TASK', 'SUBTASK'],
-    STATUSES: ['TO_DO', 'IN_PROGRESS', 'IN_REVIEW', 'DONE'],
+    STATUSES: ['TO_DO', 'IN_PROGRESS', 'DONE'],
     PRIORITIES: ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'],
     DEFAULT_TYPE:         'TASK',
     DEFAULT_STATUS:       'TO_DO',
