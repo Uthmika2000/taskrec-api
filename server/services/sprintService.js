@@ -132,19 +132,37 @@ async function updateSprintStatus(sprintId, status) {
     throw err;
   }
 
-  const sprint = await Sprint.findByIdAndUpdate(sprintId, { status }, { new: true })
-    .populate('teamId', 'name');
-
-  if (!sprint) {
+  const existing = await Sprint.findById(sprintId);
+  if (!existing) {
     const err = new Error('Sprint not found.');
     err.statusCode = 404;
     throw err;
   }
+  if (existing.status === 'COMPLETED' && status !== 'COMPLETED') {
+    const err = new Error('Completed sprints are read-only and cannot be reopened.');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const sprint = await Sprint.findByIdAndUpdate(sprintId, { status }, { new: true })
+    .populate('teamId', 'name');
 
   return sprint;
 }
 
 async function updateSprint(sprintId, body) {
+  const existing = await Sprint.findById(sprintId);
+  if (!existing) {
+    const err = new Error('Sprint not found.');
+    err.statusCode = 404;
+    throw err;
+  }
+  if (existing.status === 'COMPLETED') {
+    const err = new Error('Completed sprints are read-only.');
+    err.statusCode = 400;
+    throw err;
+  }
+
   const allowedFields = ['name', 'startDate', 'endDate', 'status', 'capacityPoints'];
   const updates = {};
 
@@ -167,12 +185,6 @@ async function updateSprint(sprintId, body) {
   const sprint = await Sprint.findByIdAndUpdate(sprintId, updates, { new: true, runValidators: true })
     .populate('teamId', 'name')
     .populate({ path: 'taskIds', select: 'title status storyPoints' });
-
-  if (!sprint) {
-    const err = new Error('Sprint not found.');
-    err.statusCode = 404;
-    throw err;
-  }
 
   return sprint;
 }
