@@ -95,25 +95,24 @@ async function updateTask(taskId, updates, userId) {
     if (updates[field] !== undefined) sanitized[field] = updates[field];
   });
 
-  const task = await Task.findByIdAndUpdate(taskId, sanitized, { new: true })
-    .populate('assigneeId', '-passwordHash')
-    .populate('reporterId', '-passwordHash');
-
-  if (!task) {
+  const existing = await Task.findById(taskId).select('sprintId');
+  if (!existing) {
     const err = new Error('Task not found');
     err.statusCode = 404;
     throw err;
   }
 
   const accessibleTeamIds = await getAccessibleTeamIds(userId);
-  const taskSprint = await Sprint.findById(task.sprintId).select('teamId');
+  const taskSprint = await Sprint.findById(existing.sprintId).select('teamId');
   if (!taskSprint || !accessibleTeamIds.includes(taskSprint.teamId.toString())) {
     const err = new Error('Task not found');
     err.statusCode = 404;
     throw err;
   }
 
-  return task;
+  return Task.findByIdAndUpdate(taskId, sanitized, { new: true })
+    .populate('assigneeId', '-passwordHash')
+    .populate('reporterId', '-passwordHash');
 }
 
 async function deleteTask(taskId, userId) {
@@ -176,24 +175,23 @@ async function updateTaskStatus(taskId, status, userId) {
     throw err;
   }
 
-  const task = await Task.findByIdAndUpdate(taskId, { status }, { new: true })
-    .populate('assigneeId', '-passwordHash')
-    .populate('reporterId', '-passwordHash');
-
-  if (!task) {
+  const existing = await Task.findById(taskId).select('teamId');
+  if (!existing) {
     const err = new Error('Task not found');
     err.statusCode = 404;
     throw err;
   }
 
   const accessibleTeamIds = await getAccessibleTeamIds(userId);
-  if (!accessibleTeamIds.includes(task.teamId.toString())) {
+  if (!accessibleTeamIds.includes(existing.teamId.toString())) {
     const err = new Error('Task not found');
     err.statusCode = 404;
     throw err;
   }
 
-  return task;
+  return Task.findByIdAndUpdate(taskId, { status }, { new: true })
+    .populate('assigneeId', '-passwordHash')
+    .populate('reporterId', '-passwordHash');
 }
 
 async function addComment(taskId, text, userId) {
