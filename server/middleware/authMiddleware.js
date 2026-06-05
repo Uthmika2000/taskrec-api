@@ -25,6 +25,11 @@ const authMiddleware = async (req, res, next) => {
         return res.status(401).json({ success: false, message: 'User not found.' });
       }
 
+      if (user.isActive === false) {
+        res.clearCookie('token');
+        return res.status(403).json({ success: false, message: 'This account has been deactivated.' });
+      }
+
       req.user = user;
       next();
     } catch (err) {

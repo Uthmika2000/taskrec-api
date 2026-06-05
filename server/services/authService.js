@@ -74,6 +74,12 @@ async function login(email, password) {
     throw err;
   }
 
+  if (user.isActive === false) {
+    const err = new Error('This account has been deactivated. Please contact your administrator.');
+    err.statusCode = 403;
+    throw err;
+  }
+
   const token = buildToken(user._id);
   return { user: userPayload(user), token };
 }
