@@ -1,125 +1,48 @@
-const jwt = require('jsonwebtoken');
-const User = require('../models/User');
-
-// ── helpers ───────────────────────────────────────────────────────────────────
-function buildToken(userId) {
-  return jwt.sign({ userId }, process.env.JWT_SECRET, { expiresIn: '7d' });
-}
+const authService = require('../services/authService');
+const { AUTH } = require('../constants');
 
 function setTokenCookie(res, token) {
   res.cookie('token', token, {
     httpOnly: true,
     secure:   process.env.NODE_ENV === 'production',
     sameSite: 'lax',
-    maxAge:   7 * 24 * 60 * 60 * 1000,   // 7 days — matches token expiry
+    maxAge:   AUTH.COOKIE_MAX_AGE,
   });
 }
 
-function userPayload(user) {
-  return {
-    _id:       user._id,
-    name:      user.name,
-    email:     user.email,
-    role:      user.role,
-    skillTags: user.skillTags,
-    teamIds:   user.teamIds,
-    createdAt: user.createdAt,
-    updatedAt: user.updatedAt,
-  };
+function handleError(error, res, next) {
+  if (error.statusCode) return res.status(error.statusCode).json({ success: false, message: error.message });
+  next(error);
 }
 
-// ── POST /api/auth/register ───────────────────────────────────────────────────
+// @route   POST /api/auth/register
+// @access  Public
 const register = async (req, res, next) => {
   try {
-    const {
-      // New UI sends firstName + lastName separately
-      firstName, lastName,
-      // Old / API callers send a combined name
-      name,
-      email, password, role, skillTags,
-    } = req.body;
-
-    // Resolve display name from either convention
-    const displayName = name?.trim() ||
-      [firstName?.trim(), lastName?.trim()].filter(Boolean).join(' ');
-
-    if (!displayName || !email || !password) {
-      return res.status(400).json({
-        success: false,
-        message: 'Name (or first + last name), email and password are required.',
-      });
-    }
-
-    const existingUser = await User.findOne({ email: email.toLowerCase() });
-    if (existingUser) {
-      return res.status(400).json({ success: false, message: 'Email already registered.' });
-    }
-
-    const user = new User({
-      name:         displayName,
-      email:        email.toLowerCase(),
-      passwordHash: password,           // User model pre-save hook hashes this
-      role:         role || 'developer',
-      skillTags:    Array.isArray(skillTags) ? skillTags : [],
-    });
-
-    await user.save();
-
-    const token = buildToken(user._id);
+    const { user, token } = await authService.register(req.body);
     setTokenCookie(res, token);
-
-    return res.status(201).json({
-      success: true,
-      data:    { user: userPayload(user), token },
-    });
-  } catch (error) {
-    next(error);
-  }
+    return res.status(201).json({ success: true, data: { user, token } });
+  } catch (error) { handleError(error, res, next); }
 };
 
-// ── POST /api/auth/login ──────────────────────────────────────────────────────
+// @route   POST /api/auth/login
+// @access  Public
 const login = async (req, res, next) => {
   try {
-    const { email, password } = req.body;
-
-    if (!email || !password) {
-      return res.status(400).json({
-        success: false,
-        message: 'Email and password are required.',
-      });
-    }
-
-    const user = await User.findOne({ email: email.toLowerCase() });
-    if (!user) {
-      return res.status(401).json({ success: false, message: 'Invalid email or password.' });
-    }
-
-    const isMatch = await user.comparePassword(password);
-    if (!isMatch) {
-      return res.status(401).json({ success: false, message: 'Invalid email or password.' });
-    }
-
-    const token = buildToken(user._id);
+    const { user, token } = await authService.login(req.body.email, req.body.password);
     setTokenCookie(res, token);
-
-    return res.json({
-      success: true,
-      data:    { user: userPayload(user), token },
-    });
-  } catch (error) {
-    next(error);
-  }
+    return res.json({ success: true, data: { user, token } });
+  } catch (error) { handleError(error, res, next); }
 };
 
-// ── GET /api/auth/me ──────────────────────────────────────────────────────────
-const getMe = async (req, res) => {
-  return res.json({
-    success: true,
-    data:    { user: userPayload(req.user) },
-  });
+// @route   GET /api/auth/me
+// @access  Private
+const getMe = (req, res) => {
+  return res.json({ success: true, data: { user: authService.userPayload(req.user) } });
 };
 
-// ── POST /api/auth/logout ─────────────────────────────────────────────────────
+// @route   POST /api/auth/logout
+// @access  Private
 const logout = (req, res) => {
   res.clearCookie('token');
   return res.json({ success: true, message: 'Logged out successfully.' });
