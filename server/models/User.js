@@ -51,5 +51,6 @@ userSchema.methods.comparePassword = async function (candidatePassword) {
 };
 
 userSchema.index({ teamIds: 1 });
+userSchema.index({ role: 1, isActive: 1 });
 
 module.exports = mongoose.model('User', userSchema);
