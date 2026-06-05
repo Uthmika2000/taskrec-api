@@ -91,6 +91,7 @@ app.use('/api/feedback', require('./routes/feedback'));
 app.use('/api/metrics', require('./routes/metrics'));
 app.use('/api/settings', require('./routes/settings'));
 app.use('/api/notifications', require('./routes/notifications'));
+app.use('/api/admin', require('./routes/admin'));
 
 // ─── Error Handler ───────────────────────────────────────────────────────────
 app.use(errorHandler);
