@@ -15,6 +15,10 @@ function setTokenCookie(res, token) {
 // @access  Public
 const register = async (req, res, next) => {
   try {
+    // console.log('[REGISTER] body received:', {
+    //   ...req.body,
+    //   password: req.body.password ? `"${req.body.password}" (len:${req.body.password.length})` : undefined,
+    // });
     const { user, token } = await authService.register(req.body);
     setTokenCookie(res, token);
     return res.status(201).json({ success: true, data: { user, token } });

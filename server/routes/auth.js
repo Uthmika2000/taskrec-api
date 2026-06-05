@@ -8,8 +8,8 @@ const { AUTH, ROLES } = require('../constants');
 
 const emailRule = body('email')
   .trim()
+  .toLowerCase()
   .isEmail().withMessage('Valid email is required')
-  .normalizeEmail()
   .isLength({ max: 254 });
 
 const passwordRule = body('password')
