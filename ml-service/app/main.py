@@ -8,12 +8,14 @@ from .schemas import (
     RecommendRequest, RecommendResponse,
     FeedbackRequest, FeedbackResponse,
     AccuracyResponse, HealthResponse,
-    RecommendationItem, ScoreBreakdown
+    RecommendationItem, ScoreBreakdown,
+    RetrainRequest,
 )
 from .recommender_v2 import get_recommendations, initialize_models
 from .feedback import log_feedback, get_accuracy
 from .collab_filter import train_cf, get_cf_stats
 from .nlp_matcher import get_model
+from .retrain import rebuild_from_payload, rebuild_from_accumulated
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -53,6 +55,12 @@ async def lifespan(app: FastAPI):
         
         model_loaded = True
         logger.info("=" * 70)
+        # Step 3: Restore feedback log from disk so the CF matrix survives restarts
+        feedback_count = load_from_disk()
+        if feedback_count > 0:
+            logger.info(f"✅ Restored {feedback_count} feedback entries from disk")
+        else:
+            logger.info("ℹ️  No saved feedback yet")
         logger.info("✅ ML Service ready for requests")
         
     except Exception as e:
@@ -201,6 +209,38 @@ async def accuracy():
 async def cf_stats():
     """Get collaborative filter statistics"""
     return get_cf_stats()
+
+
+@app.post("/retrain")
+async def retrain(request: RetrainRequest):
+    """
+    Rebuild the models from the latest feedback and hot-swap them live (no
+    restart). Call on a schedule (end of each sprint) or from an admin button.
+    The backend posts current developers, sprint tasks, and the full
+    accept/reject feedback log. With no body, falls back to a CF-only refresh
+    from feedback the service has already seen.
+    """
+    global models_trained
+    model_dir = os.getenv("MODEL_DIR", "./models")
+
+    developers = [
+        {"id": d.id, "name": d.name, "skills": (d.skills or d.skillTags)}
+        for d in request.developers
+    ]
+    tasks = [
+        {"id": t.id, "description": (t.description or t.title), "title": t.title}
+        for t in request.tasks
+    ]
+    assignments = [a.model_dump() for a in request.assignments]
+
+    if developers and tasks:
+        result = rebuild_from_payload(developers, tasks, assignments, model_dir=model_dir)
+    else:
+        result = rebuild_from_accumulated(model_dir=model_dir)
+
+    if result.get("retrained"):
+        models_trained = True
+    return result
 
 
 @app.get("/train/status")
