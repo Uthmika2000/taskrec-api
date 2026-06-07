@@ -2,54 +2,40 @@
 """
 Local Model Training Script - NO COLAB REQUIRED
 
-Trains the recommendation models locally using REAL data:
+Trains the recommendation models using REAL data:
 1. Loads real TAWOS data from MySQL database
-2. Fetches Stack Overflow survey data from Kaggle (1,000 profiles by default)
-3. Trains NLP and Collaborative Filtering models
-4. Saves models for production use
+2. Fetches Stack Overflow survey data from Kaggle
+3. Merges saved feedback from feedback_log.json (if exists)  ← NEW
+4. Trains NLP and Collaborative Filtering models
+5. Saves models for production use
 
 Usage:
     cd ml-service
     python train.py [options]
 
 Options:
-    --skip-so           Skip Stack Overflow data loading (offline mode)
+    --skip-so           Skip Stack Overflow data
     --so-profiles INT   Stack Overflow profiles      (default: 1000)
     --output-dir PATH   Model output directory       (default: ./models)
     --max-issues  INT   Max TAWOS issues to load     (default: 10000)
     --max-devs    INT   Max TAWOS developers to load (default: 2000)
 
-Required Environment Variables (set these before running):
-    DB_HOST       MySQL host        (default: localhost)
-    DB_PORT       MySQL port        (default: 3306)
-    DB_USER       MySQL username    (default: root)
-    DB_PASSWORD   MySQL password    (no default - must be set!)
-    DB_NAME       Database name     (default: TAWOS)
-
-Optional Environment Variables:
-    SO_CSV_PATH   Path to SO survey CSV (skips Kaggle download)
-    KAGGLE_USERNAME + KAGGLE_KEY  (for automatic Kaggle download)
-
-Example:
-    export DB_PASSWORD=Password123!
-    python train.py
-    python train.py --skip-so
-    python train.py --max-issues 5000 --max-devs 1000
+Required Environment Variables:
+    DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME
 """
 
 import sys
 import logging
 import argparse
 import os
+import json
 from pathlib import Path
 from datetime import datetime
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-# ── Use the REAL dataset loader instead of the simulator ──────────────────────
 from app.dataset_tawos_real import RealCombinedDataset
 from app.model_trainer import RecommenderModelTrainer
-import json
 
 logging.basicConfig(
     level=logging.INFO,
@@ -57,112 +43,141 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# ── path to saved feedback ─────────────────────────────────────────────────────
+FEEDBACK_LOG = Path("./models/feedback_log.json")
 
-def check_env_vars():
-    """Warn user if required environment variables are not set."""
-    db_password = os.environ.get("DB_PASSWORD", "")
-    if not db_password:
-        logger.warning("=" * 70)
-        logger.warning("⚠️  WARNING: DB_PASSWORD environment variable is not set!")
-        logger.warning("   Set it before running:")
-        logger.warning("   Linux/Mac : export DB_PASSWORD=your_mysql_password")
-        logger.warning("   Windows   : set DB_PASSWORD=your_mysql_password")
-        logger.warning("=" * 70)
+
+def check_env():
+    if not os.environ.get("DB_PASSWORD"):
+        logger.warning("="*70)
+        logger.warning("⚠️  DB_PASSWORD not set!")
+        logger.warning("   Windows : $env:DB_PASSWORD = 'your_password'")
+        logger.warning("   Mac/Linux: export DB_PASSWORD=your_password")
+        logger.warning("="*70)
         return False
     return True
 
 
+def load_saved_feedback() -> list:
+    """
+    Load feedback that was saved to disk by feedback.py.
+    Converts it into assignment format for CF training.
+    Returns empty list if no feedback file exists yet.
+    """
+    if not FEEDBACK_LOG.exists():
+        logger.info("ℹ️  No feedback_log.json found — training without feedback")
+        return []
+
+    try:
+        with open(FEEDBACK_LOG) as f:
+            data = json.load(f)
+
+        entries = data.get("feedback", [])
+        if not entries:
+            return []
+
+        # Convert feedback entries → assignment records
+        assignments = []
+        for e in entries:
+            assignments.append({
+                "developer_id": e.get("developerId", ""),
+                "task_id":      e.get("taskId", ""),
+                "accepted":     e.get("action") == "accept",
+                "source":       "feedback",
+            })
+
+        logger.info(f"✅ Loaded {len(assignments)} feedback assignments from disk")
+        accepted = sum(1 for a in assignments if a["accepted"])
+        rejected = len(assignments) - accepted
+        logger.info(f"   Accepted: {accepted}  |  Rejected: {rejected}")
+        return assignments
+
+    except Exception as e:
+        logger.warning(f"⚠️  Could not load feedback log: {e}")
+        return []
+
+
 def main():
-    parser = argparse.ArgumentParser(description='Train recommendation models with real TAWOS + Kaggle data')
-    parser.add_argument('--skip-so',      action='store_true', help='Skip Stack Overflow data (offline mode)')
-    parser.add_argument('--so-profiles',  type=int, default=1000,  help='Stack Overflow profiles to load (default: 1000)')
-    parser.add_argument('--output-dir',   type=str, default='./models', help='Model output directory (default: ./models)')
-    parser.add_argument('--max-issues',   type=int, default=10000, help='Max TAWOS issues to load (default: 10000)')
-    parser.add_argument('--max-devs',     type=int, default=2000,  help='Max TAWOS developers to load (default: 2000)')
+    parser = argparse.ArgumentParser(description='Train with real TAWOS + Kaggle + saved feedback')
+    parser.add_argument('--skip-so',     action='store_true')
+    parser.add_argument('--so-profiles', type=int, default=1000)
+    parser.add_argument('--output-dir',  type=str, default='./models')
+    parser.add_argument('--max-issues',  type=int, default=10000)
+    parser.add_argument('--max-devs',    type=int, default=2000)
     args = parser.parse_args()
 
-    logger.info("=" * 70)
-    logger.info("🚀 AI Agile Task Recommendation System - Model Training (REAL DATA)")
-    logger.info("=" * 70)
-    logger.info(f"   TAWOS DB : {os.environ.get('DB_USER','root')}@{os.environ.get('DB_HOST','localhost')}:{os.environ.get('DB_PORT','3306')}/{os.environ.get('DB_NAME','TAWOS')}")
-    logger.info(f"   Max Issues : {args.max_issues}  |  Max Developers : {args.max_devs}")
-    logger.info(f"   SO Data  : {'skipped' if args.skip_so else f'{args.so_profiles} profiles'}")
-    logger.info(f"   Output   : {args.output_dir}")
-    logger.info("=" * 70)
+    logger.info("="*70)
+    logger.info("🚀 AI Agile Task Recommendation System — Model Training")
+    logger.info("="*70)
+    logger.info(f"   DB      : {os.environ.get('DB_USER','root')}@"
+                f"{os.environ.get('DB_HOST','localhost')}/"
+                f"{os.environ.get('DB_NAME','TAWOS')}")
+    logger.info(f"   Issues  : {args.max_issues}  |  Devs: {args.max_devs}")
+    logger.info(f"   SO Data : {'skipped' if args.skip_so else f'{args.so_profiles} profiles'}")
+    logger.info(f"   Output  : {args.output_dir}")
+    logger.info("="*70)
 
-    # Check environment variables
-    if not check_env_vars():
-        logger.error("❌ Please set DB_PASSWORD and try again.")
+    if not check_env():
         return False
 
-    # ------------------------------------------------------------------
-    # Step 1 – Build dataset from real sources
-    # ------------------------------------------------------------------
-    logger.info("\n📊 STEP 1: Building Training Dataset from Real Sources")
-    logger.info("-" * 70)
-    logger.info("   Source 1 → MySQL (TAWOS real Jira tickets)")
-    logger.info("   Source 2 → Kaggle (Stack Overflow developer survey)")
-    logger.info("-" * 70)
+    # ── STEP 1: Build dataset ──────────────────────────────────────────────────
+    logger.info("\n📊 STEP 1: Building Training Dataset")
+    logger.info("-"*70)
 
     dataset = RealCombinedDataset(
-        # DB credentials are read from env-vars automatically
-        # (DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME)
-        use_stackoverflow=not args.skip_so,
-        so_profile_limit=args.so_profiles,
-        so_training_limit=max(100, args.so_profiles // 2),
-        max_issues=args.max_issues,
-        max_developers=args.max_devs,
+        use_stackoverflow  = not args.skip_so,
+        so_profile_limit   = args.so_profiles,
+        so_training_limit  = max(100, args.so_profiles // 2),
+        max_issues         = args.max_issues,
+        max_developers     = args.max_devs,
     )
 
     try:
-        combined_data = dataset.build()
-
+        dataset.build()
         developers  = dataset.get_all_developers()
         tasks       = dataset.get_all_tasks()
         assignments = dataset.get_all_assignments()
 
-        logger.info(f"\n✅ Dataset Summary:")
+        logger.info(f"\n   From TAWOS + Stack Overflow:")
         logger.info(f"   Developers  : {len(developers)}")
         logger.info(f"   Tasks       : {len(tasks)}")
         logger.info(f"   Assignments : {len(assignments)}")
 
-        avg_skills = sum(len(d.get('skills', [])) for d in developers) / max(len(developers), 1)
-        logger.info(f"   Avg skills  : {avg_skills:.1f}")
-
-        # Safety check — need enough data to train
-        if len(tasks) == 0:
-            logger.error("❌ No tasks loaded from TAWOS. Check your MySQL connection and import.")
+        if not tasks or not developers:
+            logger.error("❌ No data loaded. Check MySQL connection.")
             return False
-        if len(developers) == 0:
-            logger.error("❌ No developers loaded from TAWOS. Check your MySQL connection.")
-            return False
-        if len(assignments) < 10:
-            logger.warning("⚠️  Very few assignments loaded. Model will use cold-start mode.")
 
     except Exception as e:
-        logger.error(f"❌ Failed to build dataset: {e}")
-        logger.error("   Check that:")
-        logger.error("   1. MySQL is running (open MySQL Workbench to confirm)")
-        logger.error("   2. DB_PASSWORD is correct")
-        logger.error("   3. TAWOS database was imported successfully")
-        logger.error("      (run in MySQL Workbench: SELECT COUNT(*) FROM TAWOS.Issue;)")
-        import traceback
-        traceback.print_exc()
+        logger.error(f"❌ Dataset build failed: {e}")
+        import traceback; traceback.print_exc()
         return False
 
-    # ------------------------------------------------------------------
-    # Step 2 – Train models
-    # ------------------------------------------------------------------
+    # ── STEP 1b: Merge saved feedback ─────────────────────────────────────────
+    logger.info("\n💬 STEP 1b: Loading saved feedback from disk...")
+    logger.info("-"*70)
+
+    feedback_assignments = load_saved_feedback()
+
+    if feedback_assignments:
+        # Merge feedback into assignments list
+        assignments = assignments + feedback_assignments
+        logger.info(f"   Total assignments after feedback merge: {len(assignments)}")
+        logger.info(f"   (TAWOS + SO: {len(assignments) - len(feedback_assignments)}  |  "
+                    f"Feedback: {len(feedback_assignments)})")
+    else:
+        logger.info("   No saved feedback yet — will improve after PMs start using the system")
+
+    # ── STEP 2: Train models ───────────────────────────────────────────────────
     logger.info("\n🔨 STEP 2: Training Models")
-    logger.info("-" * 70)
+    logger.info("-"*70)
 
     try:
         trainer = RecommenderModelTrainer(model_dir=args.output_dir)
         result  = trainer.train_full_pipeline(developers, tasks, assignments)
 
         if result['success']:
-            logger.info("✅ Training successful!")
             meta = result['metadata']
+            logger.info("✅ Training successful!")
             logger.info(f"\n📈 Training Report:")
             logger.info(f"   Timestamp         : {meta['timestamp']}")
             logger.info(f"   Duration          : {meta['training_time_seconds']:.1f}s")
@@ -170,21 +185,20 @@ def main():
             logger.info(f"   NLP cached skills : {meta['nlp_cached_skills']}")
             logger.info(f"   CF matrix shape   : {meta['cf_matrix_shape']}")
             logger.info(f"   CF matrix density : {meta['cf_matrix_density']:.2%}")
+            if feedback_assignments:
+                logger.info(f"   Feedback included : {len(feedback_assignments)} entries ✅")
         else:
             logger.error("❌ Training failed")
             return False
 
     except Exception as e:
         logger.error(f"❌ Training error: {e}")
-        import traceback
-        traceback.print_exc()
+        import traceback; traceback.print_exc()
         return False
 
-    # ------------------------------------------------------------------
-    # Step 3 – Verify saved models
-    # ------------------------------------------------------------------
+    # ── STEP 3: Verify ────────────────────────────────────────────────────────
     logger.info("\n✅ STEP 3: Verifying Models")
-    logger.info("-" * 70)
+    logger.info("-"*70)
 
     try:
         nlp_data, cf_data = trainer.load_trained_models()
@@ -196,18 +210,16 @@ def main():
         logger.error(f"❌ Verification failed: {e}")
         return False
 
-    # ------------------------------------------------------------------
-    # Summary
-    # ------------------------------------------------------------------
-    logger.info("\n" + "=" * 70)
-    logger.info("✅ MODEL TRAINING COMPLETE  (Real TAWOS + Stack Overflow Data)")
-    logger.info("=" * 70)
-    logger.info(f"\n📦 Models saved to : {args.output_dir}")
-    logger.info(f"📄 Metadata        : {args.output_dir}/recommender_metadata.json")
+    # ── Summary ───────────────────────────────────────────────────────────────
+    logger.info("\n" + "="*70)
+    logger.info("✅ MODEL TRAINING COMPLETE")
+    logger.info("="*70)
+    logger.info(f"\n📦 Models saved to  : {args.output_dir}")
+    logger.info(f"💬 Feedback log     : {FEEDBACK_LOG}")
     logger.info(f"\n🚀 Next steps:")
-    logger.info(f"   export MODEL_DIR={args.output_dir}")
+    logger.info(f"   $env:MODEL_DIR = '{args.output_dir}'")
     logger.info(f"   python -m uvicorn app.main:app --reload")
-    logger.info("=" * 70)
+    logger.info("="*70)
     return True
 
 

@@ -11,7 +11,7 @@ from .schemas import (
     RecommendationItem, ScoreBreakdown
 )
 from .recommender_v2 import get_recommendations, initialize_models
-from .feedback import log_feedback, get_accuracy
+from .feedback import log_feedback, get_accuracy, load_from_disk
 from .collab_filter import train_cf, get_cf_stats
 from .nlp_matcher import get_model
 
@@ -53,6 +53,12 @@ async def lifespan(app: FastAPI):
         
         model_loaded = True
         logger.info("=" * 70)
+        # Load saved feedback from disk so CF matrix is restored
+        feedback_count = load_from_disk()
+        if feedback_count > 0:
+            logger.info(f"✅ Restored {feedback_count} feedback entries from disk")
+        else:
+            logger.info("ℹ️  No saved feedback yet")
         logger.info("✅ ML Service ready for requests")
         
     except Exception as e:
@@ -75,15 +81,12 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS — restrict to known origins via ALLOWED_ORIGINS env (comma-separated).
-# Defaults to local dev origins; set ALLOWED_ORIGINS in production.
-_default_origins = "http://localhost:5000,http://127.0.0.1:5000,http://localhost:5173,http://127.0.0.1:5173"
-allowed_origins = [o.strip() for o in os.getenv("ALLOWED_ORIGINS", _default_origins).split(",") if o.strip()]
+# CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=allowed_origins,
+    allow_origins=["*"],  # In production, restrict to known origins
     allow_credentials=True,
-    allow_methods=["GET", "POST"],
+    allow_methods=["*"],
     allow_headers=["*"],
 )
 

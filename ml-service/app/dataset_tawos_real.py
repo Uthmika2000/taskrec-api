@@ -1,168 +1,124 @@
 """
-Real TAWOS + Stack Overflow Dataset Loader
-==========================================
-Replaces the TAWOSSimulator with a real MySQL reader that queries your
-TAWOS database (the schema you provided in tawos.sql).
+Real TAWOS + Stack Overflow Dataset Loader  (v3 — split queries, no OOM)
+=========================================================================
+Fix from v2: replaced the single heavy GROUP BY + GROUP_CONCAT query
+with two lightweight queries — avoids MySQL sort buffer OOM error.
 
-It produces the same interface as CombinedDataset so you can drop it
-straight into train.py / recommender_v2.py without changing anything else.
-
-HOW TO GET THE DATA
-───────────────────
-1. TAWOS (MySQL)
-   • Clone  : https://github.com/SOLAR-group/TAWOS
-   • Follow the README to restore the SQL dump into MySQL/MariaDB.
-   • Set the four DB_ env-vars (or edit defaults below) and run train.py.
-
-2. Stack Overflow Survey (Kaggle)
-   • URL    : https://www.kaggle.com/datasets/berkayalan/
-               stack-overflow-annual-developer-survey-2024
-   • Option A (automatic) — set KAGGLE_USERNAME + KAGGLE_KEY env-vars,
-     and kagglehub downloads it on first run.
-   • Option B (manual)    — download the ZIP, unzip to ./data/so_survey/,
-     and set SO_CSV_PATH to the path of the main .csv file.
-
-USAGE
-─────
-# Instead of dataset_v2.py / CombinedDataset use:
-from app.dataset_tawos_real import RealCombinedDataset
-
-dataset = RealCombinedDataset(
-    db_host="localhost", db_port=3306,
-    db_user="root",      db_password="yourpassword",
-    db_name="TAWOS",
-    so_profile_limit=1000,
-)
-combined   = dataset.build()
-developers = dataset.get_all_developers()
-tasks      = dataset.get_all_tasks()
-assignments= dataset.get_all_assignments()
-
-# Then pass to the existing trainer exactly as before:
-from app.model_trainer import RecommenderModelTrainer
-trainer = RecommenderModelTrainer(model_dir="./models")
-trainer.train_full_pipeline(developers, tasks, assignments)
+Query 1: load issues in batches (no JOIN, no GROUP BY)
+Query 2: load component names separately, merge in Python
 """
 
-import os
-import logging
-import re
+import os, re, logging
 from pathlib import Path
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Optional
+from collections import defaultdict
 
 import numpy as np
 import pandas as pd
 
 logger = logging.getLogger(__name__)
 
+# ── Skill keywords ─────────────────────────────────────────────────────────────
+SKILLS = [
+    "Python","JavaScript","TypeScript","Java","Go","Rust","C#","C++","Kotlin","Swift",
+    "Ruby","PHP","Scala","Dart","R",
+    "React","Vue","Angular","Next.js","Svelte","Node.js","Express",
+    "FastAPI","Django","Flask","Spring","ASP.NET","Laravel","Rails",
+    "PostgreSQL","MySQL","MongoDB","Redis","Elasticsearch","SQLite",
+    "Cassandra","DynamoDB","Firebase","Oracle",
+    "AWS","Azure","GCP","Docker","Kubernetes","Terraform","Ansible",
+    "Jenkins","GitHub Actions","Linux","Bash","Git",
+    "TensorFlow","PyTorch","scikit-learn","Pandas","NumPy","Spark","Kafka","Airflow",
+    "React Native","Flutter","iOS","Android",
+    "REST","GraphQL","gRPC","OAuth","JWT",
+    "Jest","Pytest","Cypress","Selenium",
+    "Sharding","Replication","Indexing","Aggregation","Querying",
+]
+KW_PAT = re.compile("|".join(re.escape(k) for k in SKILLS), re.IGNORECASE)
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Helpers
-# ─────────────────────────────────────────────────────────────────────────────
+# Component name → skill tag
+COMPONENT_MAP = {
+    "ios":"iOS","android":"Android","mobile":"React Native",
+    "sharding":"Sharding","replication":"Replication","querying":"Querying",
+    "indexing":"Indexing","aggregation":"Aggregation","storage":"Storage",
+    "administration":"Administration","security":"Security",
+    "authentication":"OAuth","api":"REST","ui":"JavaScript",
+    "frontend":"JavaScript","backend":"Python","app":"Mobile",
+    "quiz":"JavaScript","documentation":"Documentation",
+    "test":"Testing","testing":"Testing","performance":"Performance",
+    "network":"Networking","cloud":"AWS","deploy":"Docker","devops":"Kubernetes",
+}
+
+def _map_component(name: str) -> str:
+    key = name.strip().lower()
+    return COMPONENT_MAP.get(key, name.strip().title())
 
 def _strip_html(text: str) -> str:
-    """Remove Jira/Confluence wiki markup and HTML tags from descriptions."""
-    if not text:
-        return ""
-    text = re.sub(r"<[^>]+>", " ", text)          # HTML tags
-    text = re.sub(r"\{[^}]+\}", " ", text)          # {code}, {panel}, etc.
-    text = re.sub(r"\s+", " ", text).strip()
-    return text[:2000]                               # cap at 2 000 chars
+    text = re.sub(r"<[^>]+>", " ", text or "")
+    text = re.sub(r"\{[^}]+\}", " ", text)
+    return re.sub(r"\s+", " ", text).strip()[:500]
+
+def _infer_skills(text: str) -> List[str]:
+    return list({s.title() for s in KW_PAT.findall(text)})
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# TAWOS MySQL reader
-# ─────────────────────────────────────────────────────────────────────────────
+# ── TAWOS MySQL reader ─────────────────────────────────────────────────────────
 
 class TAWOSRealDataset:
-    """
-    Reads from a real TAWOS MySQL database.
-
-    Schema assumptions (from your tawos.sql):
-      Issue   : ID, Issue_Key, Title, Description_Text, Type,
-                Priority, Status, Resolution, Story_Point,
-                Creator_ID, Reporter_ID, Assignee_ID, Project_ID, Sprint_ID
-      User    : ID, Project_ID
-      Project : ID, Name
-      Comment : Issue_ID, Comment_Text, Author_ID
-      Change_Log : Issue_ID, Field, To_String, Author_ID, Creation_Date
-
-    Developer skill tags are inferred from:
-      • programming languages / tech mentioned in issues they resolved
-      • component names attached to resolved issues
-      • project names
-    """
-
-    # SQL skill keywords to look for in issue text
-    SKILL_KEYWORDS = [
-        "Python", "JavaScript", "TypeScript", "Java", "C#", "C++", "Go",
-        "Rust", "Kotlin", "Swift", "Ruby", "PHP", "Scala",
-        "React", "Vue", "Angular", "Next.js", "Svelte",
-        "Node.js", "Express", "FastAPI", "Django", "Flask",
-        "Spring", "ASP.NET", "Laravel",
-        "PostgreSQL", "MySQL", "MongoDB", "Redis", "Elasticsearch",
-        "SQLite", "Cassandra", "DynamoDB", "Firebase",
-        "AWS", "Azure", "GCP", "Docker", "Kubernetes",
-        "Terraform", "Ansible", "Jenkins", "GitHub Actions",
-        "TensorFlow", "PyTorch", "scikit-learn", "Pandas", "NumPy",
-        "React Native", "Flutter", "iOS", "Android",
-        "REST", "GraphQL", "gRPC", "WebSocket",
-        "Kafka", "RabbitMQ", "Airflow",
-        "Jest", "Pytest", "Cypress", "Selenium", "Playwright",
-        "OAuth", "JWT", "OWASP",
-        "Git", "Linux", "Bash", "SQL", "Agile", "Scrum",
-    ]
 
     def __init__(
         self,
-        host: str     = "localhost",
-        port: int     = 3306,
-        user: str     = "root",
-        password: str = "",
-        db_name: str  = "TAWOS",
-        max_issues: int    = 10_000,   # cap to avoid OOM on huge datasets
-        max_developers: int = 2_000,
+        host="localhost", port=3306, user="root", password="", db_name="TAWOS",
+        max_issues=10_000, max_developers=2_000, batch_size=2_000,
     ):
-        self.host           = host
-        self.port           = port
-        self.user           = user
-        self.password       = password
-        self.db_name        = db_name
-        self.max_issues     = max_issues
-        self.max_developers = max_developers
+        self.host, self.port   = host, port
+        self.user, self.password = user, password
+        self.db_name           = db_name
+        self.max_issues        = max_issues
+        self.max_developers    = max_developers
+        self.batch_size        = batch_size          # rows per query — keeps memory low
 
-        self._developers: List[Dict] = []
+        self._developers:  List[Dict] = []
         self._tasks:       List[Dict] = []
         self._assignments: List[Dict] = []
 
-    # ------------------------------------------------------------------
+    # ── connection ─────────────────────────────────────────────────────────────
     def _connect(self):
-        """Return a live MySQL connection (requires mysql-connector-python)."""
         try:
             import mysql.connector
         except ImportError:
-            raise ImportError(
-                "mysql-connector-python not installed.\n"
-                "Run:  pip install mysql-connector-python"
-            )
+            raise ImportError("Run:  pip install mysql-connector-python")
         conn = mysql.connector.connect(
             host=self.host, port=self.port,
             user=self.user, password=self.password,
-            database=self.db_name,
-            connection_timeout=30,
+            database=self.db_name, connection_timeout=30,
         )
         logger.info(f"✅ Connected to MySQL: {self.db_name} @ {self.host}:{self.port}")
         return conn
 
-    # ------------------------------------------------------------------
+    # ── public ─────────────────────────────────────────────────────────────────
     def load(self) -> Dict:
         conn = self._connect()
         try:
-            self._developers  = self._load_developers(conn)
-            self._tasks       = self._load_tasks(conn)
-            self._assignments = self._load_assignments(conn)
+            # Step A: load issues in small batches (no JOIN, no GROUP BY)
+            all_rows = self._load_issues_batched(conn)
+            logger.info(f"   Loaded {len(all_rows):,} issues")
+
+            # Step B: load issue→component mapping separately
+            issue_ids   = [r['issue_id'] for r in all_rows]
+            comp_map    = self._load_components(conn, issue_ids)
+            logger.info(f"   Loaded components for {len(comp_map):,} issues")
+
+            # Step C: load project names separately
+            proj_map    = self._load_projects(conn)
+            logger.info(f"   Loaded {len(proj_map):,} project names")
+
         finally:
             conn.close()
+
+        # Step D: build tasks / developers / assignments in Python
+        self._tasks, self._developers, self._assignments = \
+            self._build_records(all_rows, comp_map, proj_map)
 
         logger.info(
             f"✅ TAWOS loaded — "
@@ -176,338 +132,283 @@ class TAWOSRealDataset:
             "assignments": self._assignments,
         }
 
-    # ------------------------------------------------------------------
-    def _load_developers(self, conn) -> List[Dict]:
+    # ── query A: issues in batches ────────────────────────────────────────────
+    def _load_issues_batched(self, conn) -> List[Dict]:
         """
-        Load developers (Users) who have been assigned at least one issue.
-        Infer skill tags from the text of issues they resolved.
-        """
-        cursor = conn.cursor(dictionary=True)
-
-        # Step 1: Get users who were assignees
-        cursor.execute(f"""
-            SELECT DISTINCT u.ID as user_id
-            FROM   User u
-            JOIN   Issue i ON i.Assignee_ID = u.ID
-            LIMIT  {self.max_developers}
-        """)
-        user_rows = cursor.fetchall()
-        logger.info(f"   Found {len(user_rows)} assignee users in TAWOS")
-
-        # Step 2: For each user, collect issue text to infer skills
-        kw_pattern = re.compile(
-            "|".join(re.escape(k) for k in self.SKILL_KEYWORDS),
-            re.IGNORECASE
-        )
-
-        developers = []
-        for row in user_rows:
-            uid = row["user_id"]
-
-            # Fetch titles + descriptions of issues this user resolved
-            cursor.execute("""
-                SELECT COALESCE(i.Title, '') as title,
-                       COALESCE(i.Description_Text, '') as body
-                FROM   Issue i
-                WHERE  i.Assignee_ID = %s
-                  AND  i.Status IN ('Done','Resolved','Closed')
-                LIMIT  50
-            """, (uid,))
-            issue_rows = cursor.fetchall()
-
-            raw_text = " ".join(
-                f"{r['title']} {r['body']}" for r in issue_rows
-            )
-            found = kw_pattern.findall(raw_text)
-            skills = list({s.title() for s in found})[:15]  # dedupe, cap 15
-
-            developers.append({
-                "id":   f"tawos_user_{uid}",
-                "name": f"TAWOS_User_{uid}",
-                "skills": skills or ["General"],
-                "experience_years": 0,   # not available in TAWOS schema
-                "source": "tawos",
-            })
-
-        cursor.close()
-        return developers
-
-    # ------------------------------------------------------------------
-    def _load_tasks(self, conn) -> List[Dict]:
-        """
-        Load issues as tasks.
-        Uses Description_Text (plain text) if available, else Description.
+        Load issues in small batches using LIMIT + OFFSET.
+        No JOIN, no GROUP BY → no sort-buffer OOM.
         """
         cursor = conn.cursor(dictionary=True)
-        cursor.execute(f"""
-            SELECT i.ID, i.Issue_Key, i.Title,
-                   COALESCE(i.Description_Text, i.Description, '') AS body,
-                   i.Type, i.Priority, i.Status, i.Story_Point,
-                   i.Resolution
-            FROM   Issue i
-            WHERE  i.Title IS NOT NULL
-            LIMIT  {self.max_issues}
-        """)
-        rows = cursor.fetchall()
-        cursor.close()
+        all_rows = []
+        offset   = 0
 
-        tasks = []
+        while len(all_rows) < self.max_issues:
+            fetch = min(self.batch_size, self.max_issues - len(all_rows))
+            cursor.execute(f"""
+                SELECT
+                    ID          AS issue_id,
+                    Assignee_ID AS user_id,
+                    Project_ID  AS project_id,
+                    COALESCE(Title, '')                            AS title,
+                    COALESCE(Description_Text, Description, '')   AS body,
+                    COALESCE(Type, 'Task')       AS type,
+                    COALESCE(Priority, 'Medium') AS priority,
+                    COALESCE(Status, 'Open')     AS status,
+                    COALESCE(Resolution, '')     AS resolution,
+                    COALESCE(Story_Point, 0)     AS story_points
+                FROM Issue
+                WHERE Assignee_ID IS NOT NULL
+                  AND Title IS NOT NULL
+                LIMIT {fetch} OFFSET {offset}
+            """)
+            batch = cursor.fetchall()
+            if not batch:
+                break
+            all_rows.extend(batch)
+            offset += len(batch)
+            if len(batch) < fetch:
+                break
+
+        cursor.close()
+        return all_rows
+
+    # ── query B: components (batched by issue IDs) ───────────────────────────
+    def _load_components(self, conn, issue_ids: List[int]) -> Dict[int, List[str]]:
+        """
+        Returns {issue_id: [component_name, ...]}
+        Queries in chunks of 1,000 IDs to stay within MySQL limits.
+        """
+        if not issue_ids:
+            return {}
+
+        cursor   = conn.cursor(dictionary=True)
+        comp_map = defaultdict(list)
+        chunk_sz = 1_000
+
+        for i in range(0, len(issue_ids), chunk_sz):
+            chunk = issue_ids[i : i + chunk_sz]
+            placeholders = ",".join(["%s"] * len(chunk))
+            cursor.execute(f"""
+                SELECT ic.Issue_ID, c.Name
+                FROM   Issue_Component ic
+                JOIN   Component c ON c.ID = ic.Component_ID
+                WHERE  ic.Issue_ID IN ({placeholders})
+                  AND  c.Name IS NOT NULL
+            """, chunk)
+            for row in cursor.fetchall():
+                comp_map[row['Issue_ID']].append(row['Name'])
+
+        cursor.close()
+        return dict(comp_map)
+
+    # ── query C: project names ────────────────────────────────────────────────
+    def _load_projects(self, conn) -> Dict[int, str]:
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute("SELECT ID, COALESCE(Name,'') AS name FROM Project")
+        result = {r['ID']: r['name'] for r in cursor.fetchall()}
+        cursor.close()
+        return result
+
+    # ── Step D: build final records in Python ─────────────────────────────────
+    def _build_records(self, rows, comp_map, proj_map):
+        dev_skill_text  = defaultdict(set)
+        dev_skill_comp  = defaultdict(set)
+        dev_skill_proj  = defaultdict(set)
+        dev_issue_count = defaultdict(int)
+
+        tasks       = []
+        assignments = []
+
         for r in rows:
-            raw_desc = _strip_html(r["body"])
-            title    = (r["Title"] or "").strip()
-            description = f"{title}. {raw_desc}".strip() if raw_desc else title
+            uid   = r['user_id']
+            iid   = r['issue_id']
+            title = (r['title'] or "").strip()
+            body  = _strip_html(r['body'])
+            res   = r['resolution']
+            proj  = proj_map.get(r['project_id'], "")
+            comps = comp_map.get(iid, [])
+
+            # ── enriched task description ──────────────────────────────────────
+            enriched = f"{title}. {body}"
+            if comps:
+                enriched += " Components: " + ", ".join(comps)
+            if proj:
+                enriched += f" Project: {proj}"
 
             tasks.append({
-                "id":          f"tawos_issue_{r['ID']}",
+                "id":          f"tawos_issue_{iid}",
                 "title":       title,
-                "description": description,
-                "type":        r["Type"] or "Task",
-                "priority":    r["Priority"] or "Medium",
-                "status":      r["Status"] or "Open",
-                "story_points": float(r["Story_Point"] or 0),
-                "resolved":    r["Resolution"] in ("Fixed", "Done", "Resolved"),
+                "description": enriched.strip(),
+                "type":        r['type'],
+                "priority":    r['priority'],
+                "status":      r['status'],
+                "story_points": float(r['story_points'] or 0),
+                "resolved":    res in ("Fixed","Done","Resolved"),
                 "source":      "tawos",
             })
 
-        logger.info(f"   Loaded {len(tasks)} issues from TAWOS as tasks")
-        return tasks
-
-    # ------------------------------------------------------------------
-    def _load_assignments(self, conn) -> List[Dict]:
-        """
-        Build assignment records from:
-          • Issues where an Assignee is set  → real assignments
-          • Change_Log rows where Field='assignee' → historical re-assignments
-        accepted = True  if the issue was ultimately resolved/done
-                   False otherwise
-        """
-        cursor = conn.cursor(dictionary=True)
-
-        # Direct assignments (Assignee_ID on Issue)
-        cursor.execute(f"""
-            SELECT i.ID        AS issue_id,
-                   i.Assignee_ID AS user_id,
-                   i.Status,
-                   i.Resolution
-            FROM   Issue i
-            WHERE  i.Assignee_ID IS NOT NULL
-            LIMIT  {self.max_issues}
-        """)
-        direct = cursor.fetchall()
-
-        assignments = []
-        for r in direct:
-            accepted = r["Resolution"] in ("Fixed", "Done", "Resolved") \
-                       or r["Status"] in ("Done", "Resolved", "Closed")
+            accepted = res in ("Fixed","Done","Resolved") or \
+                       r['status'] in ("Done","Resolved","Closed")
             assignments.append({
-                "developer_id": f"tawos_user_{r['user_id']}",
-                "task_id":      f"tawos_issue_{r['issue_id']}",
+                "developer_id": f"tawos_user_{uid}",
+                "task_id":      f"tawos_issue_{iid}",
                 "accepted":     bool(accepted),
-                "source":       "tawos_direct",
+                "source":       "tawos",
             })
 
-        # Historical re-assignments from Change_Log
-        cursor.execute(f"""
-            SELECT cl.Issue_ID, cl.Author_ID, cl.To_String,
-                   i.Resolution, i.Status
-            FROM   Change_Log cl
-            JOIN   Issue i ON i.ID = cl.Issue_ID
-            WHERE  cl.Field = 'assignee'
-              AND  cl.Author_ID IS NOT NULL
-            LIMIT  50000
-        """)
-        changelog = cursor.fetchall()
-        cursor.close()
+            # ── skill accumulation ─────────────────────────────────────────────
+            dev_issue_count[uid] += 1
 
-        for r in changelog:
-            accepted = r["Resolution"] in ("Fixed", "Done", "Resolved") \
-                       or r["Status"] in ("Done", "Resolved", "Closed")
-            assignments.append({
-                "developer_id": f"tawos_user_{r['Author_ID']}",
-                "task_id":      f"tawos_issue_{r['Issue_ID']}",
-                "accepted":     bool(accepted),
-                "source":       "tawos_changelog",
+            # 1. keyword scan on text
+            dev_skill_text[uid].update(_infer_skills(f"{title} {body}"))
+
+            # 2. component names (most reliable)
+            for c in comps:
+                dev_skill_comp[uid].add(_map_component(c))
+
+            # 3. project name
+            if proj:
+                dev_skill_proj[uid].update(_infer_skills(proj))
+                dev_skill_proj[uid].add(proj.strip().title()[:30])
+
+        # ── build developer list ───────────────────────────────────────────────
+        top_devs = sorted(
+            dev_issue_count.items(), key=lambda x: x[1], reverse=True
+        )[:self.max_developers]
+
+        developers = []
+        for uid, count in top_devs:
+            merged = (
+                dev_skill_comp[uid] |
+                dev_skill_proj[uid] |
+                dev_skill_text[uid]
+            )
+            skill_list = [s for s in merged if s and len(s) > 1][:18]
+            if not skill_list:
+                skill_list = ["General"]
+
+            developers.append({
+                "id":          f"tawos_user_{uid}",
+                "name":        f"TAWOS_Dev_{uid}",
+                "skills":      skill_list,
+                "skillTags":   skill_list,
+                "source":      "tawos",
+                "issue_count": count,
             })
 
-        logger.info(
-            f"   Loaded {len(direct)} direct + "
-            f"{len(changelog)} changelog assignments"
-        )
-        return assignments
+        # Log sample
+        for d in developers[:3]:
+            logger.info(f"   Sample dev {d['id']}: {d['skills'][:8]}")
 
-    # Accessors (same interface as TAWOSSimulator)
+        return tasks, developers, assignments
+
     def get_developers(self)  -> List[Dict]: return self._developers
     def get_tasks(self)       -> List[Dict]: return self._tasks
     def get_assignments(self) -> List[Dict]: return self._assignments
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Kaggle Stack Overflow loader  (same as dataset_v2 but with fallback path)
-# ─────────────────────────────────────────────────────────────────────────────
+# ── Stack Overflow loader ──────────────────────────────────────────────────────
 
 class SOSurveyDataset:
-    """
-    Loads the Stack Overflow Annual Developer Survey from Kaggle.
-
-    Two ways to provide the data:
-      A) Automatic  – set KAGGLE_USERNAME + KAGGLE_KEY in your environment
-         and the dataset is downloaded via kagglehub on first run.
-      B) Manual     – download the ZIP from Kaggle yourself, unzip it,
-         and set the env-var SO_CSV_PATH to the absolute path of the CSV.
-
-    The CSV should be the primary survey responses file (usually named
-    "survey_results_public.csv" or similar).
-    """
-
     KAGGLE_DATASET = "berkayalan/stack-overflow-annual-developer-survey-2024"
 
-    def __init__(self, cache_dir: str = "./data/so_survey"):
+    def __init__(self, cache_dir="./data/so_survey"):
         self.cache_dir = Path(cache_dir)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
-        self.df: Optional[pd.DataFrame] = None
+        self.df = None
 
-    # ------------------------------------------------------------------
-    def _find_csv(self, root: Path) -> Optional[Path]:
-        """Return the first .csv file found under root."""
-        candidates = sorted(root.glob("**/*.csv"))
+    def _find_csv(self, root):
+        candidates = sorted(Path(root).glob("**/*.csv"))
         return candidates[0] if candidates else None
 
-    # ------------------------------------------------------------------
-    def load(self) -> Optional[pd.DataFrame]:
-        # Option B: manual path
-        manual_path = os.environ.get("SO_CSV_PATH")
-        if manual_path:
-            csv_path = Path(manual_path)
-            if csv_path.exists():
-                logger.info(f"📥 Loading SO survey from manual path: {csv_path}")
-                self.df = pd.read_csv(csv_path, low_memory=False)
-                logger.info(f"✅ SO survey loaded: {self.df.shape[0]:,} rows")
-                return self.df
-            else:
-                logger.warning(f"SO_CSV_PATH set but file not found: {csv_path}")
-
-        # Option A: automatic via kagglehub
+    def load(self):
+        manual = os.environ.get("SO_CSV_PATH")
+        if manual and Path(manual).exists():
+            self.df = pd.read_csv(manual, low_memory=False)
+            logger.info(f"✅ SO survey loaded: {self.df.shape[0]:,} rows")
+            return self.df
         try:
             import kagglehub
-            logger.info(f"📥 Downloading SO survey from Kaggle: {self.KAGGLE_DATASET}")
-            dl_path = kagglehub.dataset_download(self.KAGGLE_DATASET)
-            csv_path = self._find_csv(Path(dl_path))
-            if csv_path:
-                self.df = pd.read_csv(csv_path, low_memory=False)
-                logger.info(f"✅ SO survey downloaded and loaded: {self.df.shape[0]:,} rows")
+            logger.info("📥 Downloading SO survey from Kaggle...")
+            dl = kagglehub.dataset_download(self.KAGGLE_DATASET)
+            csv = self._find_csv(dl)
+            if csv:
+                self.df = pd.read_csv(csv, low_memory=False)
+                logger.info(f"✅ SO survey downloaded: {self.df.shape[0]:,} rows")
                 return self.df
-            else:
-                logger.warning("No CSV found in Kaggle download")
         except Exception as e:
             logger.warning(f"⚠️  Kaggle download failed: {e}")
-            logger.info(
-                "   To fix: set KAGGLE_USERNAME + KAGGLE_KEY env-vars,\n"
-                "   OR download manually and set SO_CSV_PATH."
-            )
-
         return None
 
-    # ------------------------------------------------------------------
-    def get_developer_profiles(self, limit: int = 1000) -> List[Dict]:
+    def get_developer_profiles(self, limit=1000) -> List[Dict]:
         if self.df is None:
             self.load()
         if self.df is None:
-            logger.warning("SO data unavailable — skipping SO profiles")
             return []
 
-        skill_cols = [
-            c for c in self.df.columns
-            if any(kw in c for kw in [
-                "LanguageHaveWorkedWith",
-                "WebframeHaveWorkedWith",
-                "DatabaseHaveWorkedWith",
-                "ToolsTechHaveWorkedWith",
-                "PlatformHaveWorkedWith",
-                "MiscTechHaveWorkedWith",
-            ])
-        ]
+        skill_cols = [c for c in self.df.columns if any(
+            kw in c for kw in [
+                "LanguageHaveWorkedWith","WebframeHaveWorkedWith",
+                "DatabaseHaveWorkedWith","ToolsTechHaveWorkedWith",
+                "PlatformHaveWorkedWith","MiscTechHaveWorkedWith",
+            ]
+        )]
 
-        profiles: List[Dict] = []
+        profiles = []
         for idx, row in self.df.iterrows():
             if idx >= limit:
                 break
-
-            skills: List[str] = []
+            skills = []
             for col in skill_cols:
                 raw = row.get(col)
                 if pd.notna(raw):
                     skills.extend(str(raw).split(";"))
-
             skills = list({s.strip() for s in skills if s.strip()})[:20]
             if not skills:
                 continue
-
-            yc = row.get("YearsCodePro", row.get("YearsCode", 0))
             try:
-                years_exp = int(float(yc)) if pd.notna(yc) else 0
+                yc = row.get("YearsCodePro", row.get("YearsCode", 0))
+                years = int(float(yc)) if pd.notna(yc) else 0
             except Exception:
-                years_exp = 0
-
+                years = 0
             profiles.append({
-                "id":               f"so_dev_{idx}",
-                "name":             f"SO_Dev_{idx}",
-                "skills":           skills,
-                "experience_years": max(0, years_exp),
-                "developer_type":   str(row.get("DevType", "Developer")),
-                "country":          str(row.get("Country", "Unknown")),
-                "employment":       str(row.get("Employment", "Unknown")),
-                "source":           "stackoverflow",
+                "id":       f"so_dev_{idx}",
+                "name":     f"SO_Dev_{idx}",
+                "skills":   skills,
+                "skillTags": skills,
+                "experience_years": max(0, years),
+                "source":   "stackoverflow",
             })
 
         logger.info(f"✅ Extracted {len(profiles)} SO developer profiles")
         return profiles
 
-    # ------------------------------------------------------------------
-    def get_training_assignments(self, limit: int = 500) -> List[Dict]:
-        """
-        Create synthetic assignment records from SO profiles
-        (same heuristic as dataset_v2.py).
-        """
+    def get_training_assignments(self, limit=500) -> List[Dict]:
         profiles = self.get_developer_profiles(limit)
-        records: List[Dict] = []
         rng = np.random.default_rng(42)
-        for idx, profile in enumerate(profiles):
-            for skill_idx in range(min(len(profile["skills"]), 8)):
+        records = []
+        for idx, p in enumerate(profiles):
+            for si in range(min(len(p["skills"]), 8)):
                 records.append({
-                    "developer_id": profile["id"],
-                    "task_id":      f"so_task_{idx}_{skill_idx}",
+                    "developer_id": p["id"],
+                    "task_id":      f"so_task_{idx}_{si}",
                     "accepted":     bool(rng.choice([True, False], p=[0.7, 0.3])),
                     "source":       "stackoverflow",
                 })
         return records
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Combined dataset  (same public API as CombinedDataset in dataset_v2.py)
-# ─────────────────────────────────────────────────────────────────────────────
+# ── Combined dataset ───────────────────────────────────────────────────────────
 
 class RealCombinedDataset:
-    """
-    Drop-in replacement for CombinedDataset that uses:
-      • Real TAWOS MySQL data  instead of the TAWOSSimulator
-      • Real Kaggle SO data    (same as before)
-
-    Constructor reads DB credentials from keyword args OR env-vars:
-      DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME
-    """
+    """Drop-in replacement for CombinedDataset in dataset_v2.py"""
 
     def __init__(
         self,
-        db_host:     str = None,
-        db_port:     int = None,
-        db_user:     str = None,
-        db_password: str = None,
-        db_name:     str = None,
-        use_stackoverflow:  bool = True,
-        so_profile_limit:   int  = 1000,
-        so_training_limit:  int  = 500,
-        max_issues:         int  = 10_000,
-        max_developers:     int  = 2_000,
+        db_host=None, db_port=None, db_user=None, db_password=None, db_name=None,
+        use_stackoverflow=True,
+        so_profile_limit=1000, so_training_limit=500,
+        max_issues=10_000, max_developers=2_000,
     ):
         self.tawos = TAWOSRealDataset(
             host     = db_host     or os.environ.get("DB_HOST",     "localhost"),
@@ -515,33 +416,28 @@ class RealCombinedDataset:
             user     = db_user     or os.environ.get("DB_USER",     "root"),
             password = db_password or os.environ.get("DB_PASSWORD", ""),
             db_name  = db_name     or os.environ.get("DB_NAME",     "TAWOS"),
-            max_issues     = max_issues,
-            max_developers = max_developers,
+            max_issues=max_issues, max_developers=max_developers,
         )
         self.so = SOSurveyDataset() if use_stackoverflow else None
         self.so_profile_limit  = so_profile_limit
         self.so_training_limit = so_training_limit
         self.use_stackoverflow = use_stackoverflow
-
         self._so_profiles:    List[Dict] = []
         self._so_assignments: List[Dict] = []
 
-    # ------------------------------------------------------------------
     def build(self) -> Dict:
-        logger.info("🔨 Building REAL combined dataset (TAWOS + SO)...")
+        logger.info("🔨 Building REAL combined dataset (TAWOS v3 + SO)...")
 
-        # 1. Load real TAWOS data
-        logger.info("📊 Step 1: Loading real TAWOS MySQL data...")
+        logger.info("📊 Step 1: Loading TAWOS from MySQL (batched queries)...")
         tawos_data = self.tawos.load()
 
-        # 2. Load Stack Overflow data
-        if self.use_stackoverflow and self.so is not None:
-            logger.info("📊 Step 2: Loading Stack Overflow survey data...")
+        if self.use_stackoverflow and self.so:
+            logger.info("📊 Step 2: Loading Stack Overflow survey...")
             self.so.load()
             self._so_profiles    = self.so.get_developer_profiles(self.so_profile_limit)
             self._so_assignments = self.so.get_training_assignments(self.so_training_limit)
         else:
-            logger.info("ℹ️  Stack Overflow data skipped")
+            logger.info("ℹ️  Stack Overflow skipped")
 
         logger.info(
             f"✅ Dataset ready — "
@@ -552,23 +448,17 @@ class RealCombinedDataset:
         )
         return {"tawos": tawos_data, "stackoverflow": {"profiles": self._so_profiles}}
 
-    # ------------------------------------------------------------------
     def get_all_developers(self) -> List[Dict]:
         devs = list(self.tawos.get_developers())
         for p in self._so_profiles:
             devs.append({
-                "id":               p["id"],
-                "name":             p["name"],
-                "skills":           p["skills"],
-                "experience_years": p["experience_years"],
-                "source":           "stackoverflow",
+                "id": p["id"], "name": p["name"],
+                "skills": p["skills"], "skillTags": p["skillTags"],
+                "experience_years": p.get("experience_years", 0),
+                "source": "stackoverflow",
             })
         return devs
 
-    def get_all_tasks(self) -> List[Dict]:
-        return list(self.tawos.get_tasks())
-
+    def get_all_tasks(self)       -> List[Dict]: return list(self.tawos.get_tasks())
     def get_all_assignments(self) -> List[Dict]:
-        assignments = list(self.tawos.get_assignments())
-        assignments.extend(self._so_assignments)
-        return assignments
+        return list(self.tawos.get_assignments()) + self._so_assignments
