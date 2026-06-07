@@ -7,10 +7,27 @@ Falls back to seed data if models not available.
 
 from typing import List, Dict, Optional, Tuple
 import logging
+import os
 import numpy as np
 from .model_trainer import RecommenderModelTrainer
 
 logger = logging.getLogger(__name__)
+
+
+def _weight(name: str, default: float) -> float:
+    """Read a fusion weight from the environment, falling back to the default."""
+    try:
+        return float(os.getenv(name, default))
+    except (TypeError, ValueError):
+        return float(default)
+
+
+# Fusion weights — single source of truth. Override with env vars after tuning
+# (Part A). Defaults reproduce the original 0.4 / 0.4 / 0.2 split.
+W_NLP = _weight("W_NLP", 0.4)
+W_CF = _weight("W_CF", 0.4)
+W_CAP = _weight("W_CAP", 0.2)
+logger.info(f"Fusion weights: NLP={W_NLP} CF={W_CF} CAP={W_CAP}")
 
 # Global state for trained models
 _trainer: Optional[RecommenderModelTrainer] = None
@@ -116,11 +133,11 @@ def get_recommendations(
                 load_ratio = min(1.0, current_load / sprint_capacity)
                 capacity_score = 1.0 - load_ratio
                 
-                # Composite score: 0.4 NLP + 0.4 CF + 0.2 Capacity
+                # Composite score (weights from env: W_NLP / W_CF / W_CAP)
                 combined_score = (
-                    0.4 * nlp_score +
-                    0.4 * cf_score +
-                    0.2 * capacity_score
+                    W_NLP * nlp_score +
+                    W_CF * cf_score +
+                    W_CAP * capacity_score
                 )
                 combined_score = max(0.0, min(1.0, combined_score))
                 
@@ -188,11 +205,11 @@ def _fallback_recommendations(
         load_ratio = min(1.0, current_load / sprint_capacity)
         capacity_score = 1.0 - load_ratio
         
-        # Composite
+        # Composite (weights from env: W_NLP / W_CF / W_CAP)
         combined_score = (
-            0.4 * nlp_score +
-            0.4 * cf_score +
-            0.2 * capacity_score
+            W_NLP * nlp_score +
+            W_CF * cf_score +
+            W_CAP * capacity_score
         )
         combined_score = max(0.0, min(1.0, combined_score))
         

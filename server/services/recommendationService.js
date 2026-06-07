@@ -1,3 +1,4 @@
+// recommendationService.js 
 const axios = require('axios');
 const Task = require('../models/Task');
 const User = require('../models/User');
@@ -252,6 +253,35 @@ async function getRecommendations({ taskId } = {}) {
     .sort({ createdAt: -1 });
 }
 
+async function triggerRetrain() {
+  const mlServiceUrl = process.env.ML_SERVICE_URL || 'http://localhost:8000';
+
+  const developers = await User.find({ role: 'developer' }).select('name skillTags');
+  const tasks = await Task.find().select('title description');
+  const feedback = await Feedback.find().select('taskId developerId action');
+
+  const payload = {
+    developers: developers.map(d => ({
+      id: d._id.toString(),
+      name: d.name,
+      skillTags: d.skillTags || [],
+    })),
+    tasks: tasks.map(t => ({
+      id: t._id.toString(),
+      description: `${t.title} ${t.description}`.trim(),
+      title: t.title,
+    })),
+    assignments: feedback.map(f => ({
+      developer_id: f.developerId.toString(),
+      task_id: f.taskId.toString(),
+      accepted: f.action === 'accept',
+    })),
+  };
+
+  const res = await axios.post(`${mlServiceUrl}/retrain`, payload, { timeout: 120000 });
+  return res.data;
+}
+
 module.exports = {
   getRecommendation,
   acceptRecommendation,
@@ -259,4 +289,5 @@ module.exports = {
   logFeedback,
   getRecommendationByTask,
   getRecommendations,
+  triggerRetrain,
 };

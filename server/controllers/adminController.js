@@ -14,3 +14,10 @@ exports.getModelStatus = async (req, res, next) => {
     res.json({ success: true, data });
   } catch (error) { handleError(error, res, next); }
 };
+
+exports.retrainModels = async (req, res, next) => {
+  try {
+    const data = await adminService.triggerRetrain();
+    res.json({ success: true, data });
+  } catch (error) { handleError(error, res, next); }
+};

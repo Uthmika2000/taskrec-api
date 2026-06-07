@@ -68,3 +68,29 @@ class AccuracyResponse(BaseModel):
 class HealthResponse(BaseModel):
     status: str
     model_loaded: bool
+
+
+# ── Retrain (live retraining from accumulated feedback) ───────────────────────
+class RetrainDeveloper(BaseModel):
+    id: str
+    name: Optional[str] = ""
+    skills: List[str] = Field(default_factory=list)
+    skillTags: List[str] = Field(default_factory=list)
+
+
+class RetrainTask(BaseModel):
+    id: str
+    description: Optional[str] = ""
+    title: Optional[str] = ""
+
+
+class RetrainAssignment(BaseModel):
+    developer_id: str
+    task_id: str
+    accepted: bool = True
+
+
+class RetrainRequest(BaseModel):
+    developers: List[RetrainDeveloper] = Field(default_factory=list)
+    tasks: List[RetrainTask] = Field(default_factory=list)
+    assignments: List[RetrainAssignment] = Field(default_factory=list)

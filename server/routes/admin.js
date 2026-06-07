@@ -5,5 +5,6 @@ const { authMiddleware, requireRole } = require('../middleware/authMiddleware');
 
 router.get('/stats',        authMiddleware, requireRole('admin'), adminController.getStats);
 router.get('/model-status', authMiddleware, requireRole('admin'), adminController.getModelStatus);
+router.post('/retrain',     authMiddleware, requireRole('admin'), adminController.retrainModels);
 
 module.exports = router;

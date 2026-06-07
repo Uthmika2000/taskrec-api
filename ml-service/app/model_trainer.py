@@ -180,16 +180,11 @@ class EnhancedNLPModel:
                     self.model.encode([skill], convert_to_numpy=True)[0]
                 )
         
-        # Average skill embeddings
-        avg_skill_embedding = np.mean(skill_embeddings, axis=0)
-        
-        # Cosine similarity
-        similarity = float(np.dot(task_embedding, avg_skill_embedding) / (
-            np.linalg.norm(task_embedding) * np.linalg.norm(avg_skill_embedding) + 1e-8
-        ))
-        
-        # Normalize to [0, 1]
-        return max(0.0, min(1.0, similarity))
+        # Top-k max-similarity aggregation (matches nlp_matcher + the evaluation
+        # notebook). Scores each skill against the task and averages only the
+        # strongest matches, instead of blurring all skills into one mean vector.
+        from .nlp_matcher import topk_skill_similarity
+        return topk_skill_similarity(task_embedding, skill_embeddings)
     
     def get_state(self) -> Dict:
         """Get model state for serialization"""
