@@ -42,21 +42,21 @@ def initialize_models(model_dir: str = "./models") -> bool:
     global _trainer, _models_loaded
     
     try:
-        logger.info("🚀 Loading trained models...")
+        logger.info("Loading trained models...")
         _trainer = RecommenderModelTrainer(model_dir=model_dir)
         
         nlp_data, cf_data = _trainer.load_trained_models()
         
         if nlp_data and cf_data:
             _models_loaded = True
-            logger.info("✅ Trained models loaded successfully")
+            logger.info("Trained models loaded successfully")
             return True
         else:
-            logger.warning("⚠️  Could not load some models (will use seed data)")
+            logger.warning("Could not load some models (will use seed data)")
             return False
             
     except Exception as e:
-        logger.error(f"❌ Failed to initialize models: {e}")
+        logger.error(f"Failed to initialize models: {e}")
         return False
 
 
@@ -102,14 +102,14 @@ def get_recommendations(
     recommendations = []
     
     if not _models_loaded or _trainer is None:
-        logger.info("⚠️  Models not loaded, using fallback scoring")
+        logger.info("Models not loaded, using fallback scoring")
         # Fallback to basic scoring
         recommendations = _fallback_recommendations(
             task, developers, assignments, workloads, sprint_capacity
         )
     else:
         # Use trained models
-        logger.info(f"📊 Using trained models for task {task_id}")
+        logger.info(f"Using trained models for task {task_id}")
         
         try:
             # For each developer, compute scores
@@ -155,7 +155,7 @@ def get_recommendations(
                 })
         
         except Exception as e:
-            logger.error(f"❌ Error during model-based recommendation: {e}")
+            logger.error(f"Error during model-based recommendation: {e}")
             # Fall back to basic scoring
             recommendations = _fallback_recommendations(
                 task, developers, assignments, workloads, sprint_capacity
@@ -259,5 +259,5 @@ def initialize_from_stack_overflow() -> bool:
     Legacy function for backward compatibility.
     Stack Overflow integration now handled during model training.
     """
-    logger.info("ℹ️  SO integration handled during model training phase")
+    logger.info("SO integration handled during model training phase")
     return True

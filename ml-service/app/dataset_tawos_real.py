@@ -151,7 +151,7 @@ class TAWOSRealDataset:
             database=self.db_name,
             connection_timeout=30,
         )
-        logger.info(f"✅ Connected to MySQL: {self.db_name} @ {self.host}:{self.port}")
+        logger.info(f"Connected to MySQL: {self.db_name} @ {self.host}:{self.port}")
         return conn
 
     # ------------------------------------------------------------------
@@ -165,7 +165,7 @@ class TAWOSRealDataset:
             conn.close()
 
         logger.info(
-            f"✅ TAWOS loaded — "
+            f"TAWOS loaded — "
             f"{len(self._developers)} devs, "
             f"{len(self._tasks)} tasks, "
             f"{len(self._assignments)} assignments"
@@ -379,9 +379,9 @@ class SOSurveyDataset:
         if manual_path:
             csv_path = Path(manual_path)
             if csv_path.exists():
-                logger.info(f"📥 Loading SO survey from manual path: {csv_path}")
+                logger.info(f"Loading SO survey from manual path: {csv_path}")
                 self.df = pd.read_csv(csv_path, low_memory=False)
-                logger.info(f"✅ SO survey loaded: {self.df.shape[0]:,} rows")
+                logger.info(f"SO survey loaded: {self.df.shape[0]:,} rows")
                 return self.df
             else:
                 logger.warning(f"SO_CSV_PATH set but file not found: {csv_path}")
@@ -389,17 +389,17 @@ class SOSurveyDataset:
         # Option A: automatic via kagglehub
         try:
             import kagglehub
-            logger.info(f"📥 Downloading SO survey from Kaggle: {self.KAGGLE_DATASET}")
+            logger.info(f"Downloading SO survey from Kaggle: {self.KAGGLE_DATASET}")
             dl_path = kagglehub.dataset_download(self.KAGGLE_DATASET)
             csv_path = self._find_csv(Path(dl_path))
             if csv_path:
                 self.df = pd.read_csv(csv_path, low_memory=False)
-                logger.info(f"✅ SO survey downloaded and loaded: {self.df.shape[0]:,} rows")
+                logger.info(f"SO survey downloaded and loaded: {self.df.shape[0]:,} rows")
                 return self.df
             else:
                 logger.warning("No CSV found in Kaggle download")
         except Exception as e:
-            logger.warning(f"⚠️  Kaggle download failed: {e}")
+            logger.warning(f"Kaggle download failed: {e}")
             logger.info(
                 "   To fix: set KAGGLE_USERNAME + KAGGLE_KEY env-vars,\n"
                 "   OR download manually and set SO_CSV_PATH."
@@ -459,7 +459,7 @@ class SOSurveyDataset:
                 "source":           "stackoverflow",
             })
 
-        logger.info(f"✅ Extracted {len(profiles)} SO developer profiles")
+        logger.info(f"Extracted {len(profiles)} SO developer profiles")
         return profiles
 
     # ------------------------------------------------------------------
@@ -528,23 +528,23 @@ class RealCombinedDataset:
 
     # ------------------------------------------------------------------
     def build(self) -> Dict:
-        logger.info("🔨 Building REAL combined dataset (TAWOS + SO)...")
+        logger.info("Building REAL combined dataset (TAWOS + SO)...")
 
         # 1. Load real TAWOS data
-        logger.info("📊 Step 1: Loading real TAWOS MySQL data...")
+        logger.info("Step 1: Loading real TAWOS MySQL data...")
         tawos_data = self.tawos.load()
 
         # 2. Load Stack Overflow data
         if self.use_stackoverflow and self.so is not None:
-            logger.info("📊 Step 2: Loading Stack Overflow survey data...")
+            logger.info("Step 2: Loading Stack Overflow survey data...")
             self.so.load()
             self._so_profiles    = self.so.get_developer_profiles(self.so_profile_limit)
             self._so_assignments = self.so.get_training_assignments(self.so_training_limit)
         else:
-            logger.info("ℹ️  Stack Overflow data skipped")
+            logger.info("Stack Overflow data skipped")
 
         logger.info(
-            f"✅ Dataset ready — "
+            f"Dataset ready — "
             f"TAWOS: {len(tawos_data['developers'])} devs / "
             f"{len(tawos_data['tasks'])} tasks / "
             f"{len(tawos_data['assignments'])} assignments | "

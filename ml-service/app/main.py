@@ -30,26 +30,26 @@ async def lifespan(app: FastAPI):
     global model_loaded, models_trained
     # Startup: load trained models
     try:
-        logger.info("🚀 Starting ML Service with Enhanced Models...")
+        logger.info("Starting ML Service with Enhanced Models...")
         logger.info("=" * 70)
         
         # Get model directory from environment
         model_dir = os.getenv("MODEL_DIR", "./models")
         
         # Step 1: Load sentence-transformers base model
-        logger.info("📥 Step 1: Loading base NLP model...")
+        logger.info("Step 1: Loading base NLP model...")
         get_model()
-        logger.info("✅ Base NLP model ready")
+        logger.info("Base NLP model ready")
         
         # Step 2: Load trained models
-        logger.info("📊 Step 2: Loading trained models...")
+        logger.info("Step 2: Loading trained models...")
         trained_loaded = initialize_models(model_dir=model_dir)
         
         if trained_loaded:
-            logger.info("✅ Trained models loaded from disk")
+            logger.info("Trained models loaded from disk")
             models_trained = True
         else:
-            logger.warning("⚠️  Trained models not found")
+            logger.warning("Trained models not found")
             logger.info("   To train models, run: python train.py")
             logger.info("   Models will use fallback/seed-based recommendations")
         
@@ -58,13 +58,13 @@ async def lifespan(app: FastAPI):
         # Step 3: Restore feedback log from disk so the CF matrix survives restarts
         feedback_count = load_from_disk()
         if feedback_count > 0:
-            logger.info(f"✅ Restored {feedback_count} feedback entries from disk")
+            logger.info(f"Restored {feedback_count} feedback entries from disk")
         else:
-            logger.info("ℹ️  No saved feedback yet")
-        logger.info("✅ ML Service ready for requests")
+            logger.info("No saved feedback yet")
+        logger.info("ML Service ready for requests")
         
     except Exception as e:
-        logger.error(f"❌ Startup error: {e}")
+        logger.error(f"Startup error: {e}")
         import traceback
         traceback.print_exc()
         model_loaded = False
@@ -73,7 +73,7 @@ async def lifespan(app: FastAPI):
     yield
     
     # Shutdown
-    logger.info("👋 ML Service shutting down")
+    logger.info("ML Service shutting down")
 
 
 app = FastAPI(
@@ -130,7 +130,7 @@ async def recommend(request: RecommendRequest):
     Uses trained models if available, falls back to heuristics otherwise.
     """
     try:
-        logger.info(f"📊 Recommend request for task: {request.task.id}")
+        logger.info(f"Recommend request for task: {request.task.id}")
 
         result = get_recommendations(
             task={
@@ -157,14 +157,14 @@ async def recommend(request: RecommendRequest):
             for r in result['recommendations']
         ]
 
-        logger.info(f"✅ Returned {len(recommendations)} recommendations")
+        logger.info(f"Returned {len(recommendations)} recommendations")
         
         return RecommendResponse(
             recommendations=recommendations,
             cold_start=result.get('cold_start', False),
         )
     except Exception as e:
-        logger.error(f"❌ Recommend error: {e}", exc_info=True)
+        logger.error(f"Recommend error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -172,7 +172,7 @@ async def recommend(request: RecommendRequest):
 async def feedback(request: FeedbackRequest):
     """Log feedback on recommendation (for retraining)"""
     try:
-        logger.info(f"💬 Feedback: {request.action} for task={request.taskId} dev={request.developerId}")
+        logger.info(f"Feedback: {request.action} for task={request.taskId} dev={request.developerId}")
 
         result = log_feedback(
             taskId=request.taskId,
@@ -186,7 +186,7 @@ async def feedback(request: FeedbackRequest):
             newAccuracy=result.get('newAccuracy'),
         )
     except Exception as e:
-        logger.error(f"❌ Feedback error: {e}")
+        logger.error(f"Feedback error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -201,7 +201,7 @@ async def accuracy():
             totalFeedback=stats['totalFeedback'],
         )
     except Exception as e:
-        logger.error(f"❌ Accuracy error: {e}")
+        logger.error(f"Accuracy error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

@@ -63,7 +63,7 @@ def check_env_vars():
     db_password = os.environ.get("DB_PASSWORD", "")
     if not db_password:
         logger.warning("=" * 70)
-        logger.warning("⚠️  WARNING: DB_PASSWORD environment variable is not set!")
+        logger.warning("WARNING: DB_PASSWORD environment variable is not set!")
         logger.warning("   Set it before running:")
         logger.warning("   Linux/Mac : export DB_PASSWORD=your_mysql_password")
         logger.warning("   Windows   : set DB_PASSWORD=your_mysql_password")
@@ -82,7 +82,7 @@ def main():
     args = parser.parse_args()
 
     logger.info("=" * 70)
-    logger.info("🚀 AI Agile Task Recommendation System - Model Training (REAL DATA)")
+    logger.info("AI Agile Task Recommendation System - Model Training (REAL DATA)")
     logger.info("=" * 70)
     logger.info(f"   TAWOS DB : {os.environ.get('DB_USER','root')}@{os.environ.get('DB_HOST','localhost')}:{os.environ.get('DB_PORT','3306')}/{os.environ.get('DB_NAME','TAWOS')}")
     logger.info(f"   Max Issues : {args.max_issues}  |  Max Developers : {args.max_devs}")
@@ -92,13 +92,13 @@ def main():
 
     # Check environment variables
     if not check_env_vars():
-        logger.error("❌ Please set DB_PASSWORD and try again.")
+        logger.error("Please set DB_PASSWORD and try again.")
         return False
 
     # ------------------------------------------------------------------
     # Step 1 – Build dataset from real sources
     # ------------------------------------------------------------------
-    logger.info("\n📊 STEP 1: Building Training Dataset from Real Sources")
+    logger.info("\nSTEP 1: Building Training Dataset from Real Sources")
     logger.info("-" * 70)
     logger.info("   Source 1 → MySQL (TAWOS real Jira tickets)")
     logger.info("   Source 2 → Kaggle (Stack Overflow developer survey)")
@@ -121,7 +121,7 @@ def main():
         tasks       = dataset.get_all_tasks()
         assignments = dataset.get_all_assignments()
 
-        logger.info(f"\n✅ Dataset Summary:")
+        logger.info(f"\nDataset Summary:")
         logger.info(f"   Developers  : {len(developers)}")
         logger.info(f"   Tasks       : {len(tasks)}")
         logger.info(f"   Assignments : {len(assignments)}")
@@ -131,16 +131,16 @@ def main():
 
         # Safety check — need enough data to train
         if len(tasks) == 0:
-            logger.error("❌ No tasks loaded from TAWOS. Check your MySQL connection and import.")
+            logger.error("No tasks loaded from TAWOS. Check your MySQL connection and import.")
             return False
         if len(developers) == 0:
-            logger.error("❌ No developers loaded from TAWOS. Check your MySQL connection.")
+            logger.error("No developers loaded from TAWOS. Check your MySQL connection.")
             return False
         if len(assignments) < 10:
-            logger.warning("⚠️  Very few assignments loaded. Model will use cold-start mode.")
+            logger.warning("Very few assignments loaded. Model will use cold-start mode.")
 
     except Exception as e:
-        logger.error(f"❌ Failed to build dataset: {e}")
+        logger.error(f"Failed to build dataset: {e}")
         logger.error("   Check that:")
         logger.error("   1. MySQL is running (open MySQL Workbench to confirm)")
         logger.error("   2. DB_PASSWORD is correct")
@@ -153,7 +153,7 @@ def main():
     # ------------------------------------------------------------------
     # Step 2 – Train models
     # ------------------------------------------------------------------
-    logger.info("\n🔨 STEP 2: Training Models")
+    logger.info("\nSTEP 2: Training Models")
     logger.info("-" * 70)
 
     try:
@@ -161,9 +161,9 @@ def main():
         result  = trainer.train_full_pipeline(developers, tasks, assignments)
 
         if result['success']:
-            logger.info("✅ Training successful!")
+            logger.info("Training successful!")
             meta = result['metadata']
-            logger.info(f"\n📈 Training Report:")
+            logger.info(f"\nTraining Report:")
             logger.info(f"   Timestamp         : {meta['timestamp']}")
             logger.info(f"   Duration          : {meta['training_time_seconds']:.1f}s")
             logger.info(f"   NLP cached tasks  : {meta['nlp_cached_tasks']}")
@@ -171,11 +171,11 @@ def main():
             logger.info(f"   CF matrix shape   : {meta['cf_matrix_shape']}")
             logger.info(f"   CF matrix density : {meta['cf_matrix_density']:.2%}")
         else:
-            logger.error("❌ Training failed")
+            logger.error("Training failed")
             return False
 
     except Exception as e:
-        logger.error(f"❌ Training error: {e}")
+        logger.error(f"Training error: {e}")
         import traceback
         traceback.print_exc()
         return False
@@ -183,28 +183,28 @@ def main():
     # ------------------------------------------------------------------
     # Step 3 – Verify saved models
     # ------------------------------------------------------------------
-    logger.info("\n✅ STEP 3: Verifying Models")
+    logger.info("\nSTEP 3: Verifying Models")
     logger.info("-" * 70)
 
     try:
         nlp_data, cf_data = trainer.load_trained_models()
         if nlp_data and cf_data:
-            logger.info("✅ Models verified and loaded successfully!")
+            logger.info("Models verified and loaded successfully!")
         else:
-            logger.warning("⚠️  Some models failed to load")
+            logger.warning("Some models failed to load")
     except Exception as e:
-        logger.error(f"❌ Verification failed: {e}")
+        logger.error(f"Verification failed: {e}")
         return False
 
     # ------------------------------------------------------------------
     # Summary
     # ------------------------------------------------------------------
     logger.info("\n" + "=" * 70)
-    logger.info("✅ MODEL TRAINING COMPLETE  (Real TAWOS + Stack Overflow Data)")
+    logger.info("MODEL TRAINING COMPLETE  (Real TAWOS + Stack Overflow Data)")
     logger.info("=" * 70)
-    logger.info(f"\n📦 Models saved to : {args.output_dir}")
-    logger.info(f"📄 Metadata        : {args.output_dir}/recommender_metadata.json")
-    logger.info(f"\n🚀 Next steps:")
+    logger.info(f"\nModels saved to : {args.output_dir}")
+    logger.info(f"Metadata        : {args.output_dir}/recommender_metadata.json")
+    logger.info(f"\nNext steps:")
     logger.info(f"   export MODEL_DIR={args.output_dir}")
     logger.info(f"   python -m uvicorn app.main:app --reload")
     logger.info("=" * 70)

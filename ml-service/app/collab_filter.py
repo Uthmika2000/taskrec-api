@@ -29,7 +29,7 @@ class CollabFilter:
         Bootstrap CF model with Stack Overflow survey data.
         Uses skill similarity to initialize developer-task affinity.
         """
-        print(f"📊 Bootstrapping CF from {len(so_profiles)} SO profiles...")
+        print(f"Bootstrapping CF from {len(so_profiles)} SO profiles...")
         self.so_skill_matrix = so_skill_matrix
         
         # Extract common skills from SO data
@@ -37,7 +37,7 @@ class CollabFilter:
         matrix_data = so_skill_matrix.get('matrix', [])
         
         if not skill_index or not matrix_data:
-            print("⚠️  SO data bootstrap skipped (empty skill matrix)")
+            print("SO data bootstrap skipped (empty skill matrix)")
             return
         
         # Build initial dev-task affinity from skill co-occurrence
@@ -55,7 +55,7 @@ class CollabFilter:
                         'accepted': True,  # SO data represents real success patterns
                     })
         
-        print(f"✅ SO bootstrap generated {len(bootstrap_data)} synthetic interactions")
+        print(f"SO bootstrap generated {len(bootstrap_data)} synthetic interactions")
         return bootstrap_data
 
     def train(self, assignments: List[Dict], so_bootstrap_data: List[Dict] = None) -> bool:
@@ -70,7 +70,7 @@ class CollabFilter:
             all_assignments.extend(so_bootstrap_data)
         
         if len(all_assignments) < self.MIN_RECORDS:
-            print(f"⚠️  Cold-start: only {len(all_assignments)} records (need {self.MIN_RECORDS})")
+            print(f"Cold-start: only {len(all_assignments)} records (need {self.MIN_RECORDS})")
             self._fitted = False
             return False
 
@@ -114,7 +114,7 @@ class CollabFilter:
         self.knn_model.fit(filled_matrix)
 
         self._fitted = True
-        print(f"✅ CollabFilter trained with {len(all_assignments)} total assignments ({len(assignments)} real, {len(so_bootstrap_data or [])} SO bootstrap), {n_devs} devs, {n_tasks} tasks")
+        print(f"CollabFilter trained with {len(all_assignments)} total assignments ({len(assignments)} real, {len(so_bootstrap_data or [])} SO bootstrap), {n_devs} devs, {n_tasks} tasks")
         return True
 
     def predict(self, developer_id: str, task_id: str) -> float:
@@ -166,9 +166,9 @@ class CollabFilter:
                     self.matrix[di, ti] = 0.7 * current + 0.3 * (1.0 if accepted else 0.0)
             else:
                 # New developer or task seen — trigger re-train on next call
-                print("🔄 New developer/task seen, collab filter updated with new entry")
+                print("New developer/task seen, collab filter updated with new entry")
         except Exception as e:
-            print(f"⚠️  Incremental update error: {e}")
+            print(f"Incremental update error: {e}")
 
     def get_stats(self) -> Dict:
         """Return statistics about the model."""

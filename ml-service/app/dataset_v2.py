@@ -210,7 +210,7 @@ class TAWOSSimulator:
         self.tasks       = self._generate_tasks()
         self.assignments = self._generate_assignments()
         logger.info(
-            f"✅ Generated: {len(self.developers)} developers, "
+            f"Generated: {len(self.developers)} developers, "
             f"{len(self.tasks)} tasks, {len(self.assignments)} assignments"
         )
         return {
@@ -304,11 +304,11 @@ class EnhancedStackOverflowDataset:
         try:
             logger.info(f"Downloading {self.dataset_name}...")
             path = kagglehub.dataset_download(self.dataset_name)
-            logger.info(f"✅ Dataset downloaded to: {path}")
+            logger.info(f"Dataset downloaded to: {path}")
             self.dataset_path = path
             return path
         except Exception as e:
-            logger.warning(f"⚠️ Failed to download SO dataset: {e}")
+            logger.warning(f"Failed to download SO dataset: {e}")
             return None
 
     def load(self):
@@ -324,7 +324,7 @@ class EnhancedStackOverflowDataset:
                 return None
             logger.info(f"Loading CSV: {csv_files[0]}")
             self.df = pd.read_csv(csv_files[0])
-            logger.info(f"✅ Loaded: {self.df.shape[0]} rows, {self.df.shape[1]} columns")
+            logger.info(f"Loaded: {self.df.shape[0]} rows, {self.df.shape[1]} columns")
             return self.df
         except Exception as e:
             logger.error(f"Failed to load dataset: {e}")
@@ -377,7 +377,7 @@ class EnhancedStackOverflowDataset:
             if profile['skills']:
                 profiles.append(profile)
 
-        logger.info(f"✅ Extracted {len(profiles)} developer profiles from SO data")
+        logger.info(f"Extracted {len(profiles)} developer profiles from SO data")
         return profiles
 
     def get_training_data(self, limit=500) -> List[Dict]:   # ← raised to 500
@@ -431,11 +431,11 @@ class CombinedDataset:
         self.so_data:    Optional[Dict] = None
 
     def build(self) -> Dict:
-        logger.info("🔨 Building combined dataset...")
+        logger.info("Building combined dataset...")
 
         if self.use_tawos_sim:
             logger.info(
-                f"📊 Generating TAWOS-like data "
+                f"Generating TAWOS-like data "
                 f"({self.n_tawos_devs} devs, {self.n_tawos_tasks} tasks)..."
             )
             tawos_gen       = TAWOSSimulator(
@@ -446,7 +446,7 @@ class CombinedDataset:
 
         so_data: Dict = {}
         if self.use_stackoverflow:
-            logger.info("📥 Loading Stack Overflow data...")
+            logger.info("Loading Stack Overflow data...")
             so_dataset  = EnhancedStackOverflowDataset()
             so_profiles = so_dataset.get_developer_profiles(limit=self.so_profile_limit)
             so_training = so_dataset.get_training_data(limit=self.so_training_limit)
@@ -458,7 +458,7 @@ class CombinedDataset:
             'stackoverflow': so_data,
             'timestamp':     datetime.now().isoformat(),
         }
-        logger.info("✅ Combined dataset ready")
+        logger.info("Combined dataset ready")
         return combined
 
     # ------------------------------------------------------------------
@@ -510,7 +510,7 @@ if __name__ == "__main__":
     tasks   = dataset.get_all_tasks()
     assigns = dataset.get_all_assignments()
 
-    print(f"\n📊 Dataset Statistics:")
+    print(f"\nDataset Statistics:")
     print(f"   Developers  : {len(devs)}")
     print(f"   Tasks       : {len(tasks)}")
     print(f"   Assignments : {len(assigns)}")

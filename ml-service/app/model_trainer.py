@@ -35,10 +35,10 @@ class ModelPersistence:
         try:
             with open(model_path, 'wb') as f:
                 pickle.dump(model_dict, f)
-            logger.info(f"✅ Saved model: {model_path}")
+            logger.info(f"Saved model: {model_path}")
             return str(model_path)
         except Exception as e:
-            logger.error(f"❌ Failed to save model: {e}")
+            logger.error(f"Failed to save model: {e}")
             return None
     
     def load_model(self, model_name: str, version: str = "latest"):
@@ -48,13 +48,13 @@ class ModelPersistence:
         try:
             with open(model_path, 'rb') as f:
                 model_dict = pickle.load(f)
-            logger.info(f"✅ Loaded model: {model_path}")
+            logger.info(f"Loaded model: {model_path}")
             return model_dict
         except FileNotFoundError:
-            logger.warning(f"⚠️ Model not found: {model_path}")
+            logger.warning(f"Model not found: {model_path}")
             return None
         except Exception as e:
-            logger.error(f"❌ Failed to load model: {e}")
+            logger.error(f"Failed to load model: {e}")
             return None
     
     def save_metadata(self, metadata: Dict, model_name: str):
@@ -64,10 +64,10 @@ class ModelPersistence:
         try:
             with open(meta_path, 'w') as f:
                 json.dump(metadata, f, indent=2, default=str)
-            logger.info(f"✅ Saved metadata: {meta_path}")
+            logger.info(f"Saved metadata: {meta_path}")
             return str(meta_path)
         except Exception as e:
-            logger.error(f"❌ Failed to save metadata: {e}")
+            logger.error(f"Failed to save metadata: {e}")
             return None
     
     def load_metadata(self, model_name: str) -> Optional[Dict]:
@@ -77,13 +77,13 @@ class ModelPersistence:
         try:
             with open(meta_path, 'r') as f:
                 metadata = json.load(f)
-            logger.info(f"✅ Loaded metadata: {meta_path}")
+            logger.info(f"Loaded metadata: {meta_path}")
             return metadata
         except FileNotFoundError:
-            logger.warning(f"⚠️ Metadata not found: {meta_path}")
+            logger.warning(f"Metadata not found: {meta_path}")
             return None
         except Exception as e:
-            logger.error(f"❌ Failed to load metadata: {e}")
+            logger.error(f"Failed to load metadata: {e}")
             return None
 
 
@@ -103,9 +103,9 @@ class EnhancedNLPModel:
     def load_pretrained(self):
         """Load pretrained sentence-transformers model"""
         if self.model is None:
-            logger.info(f"📥 Loading {self.model_name}...")
+            logger.info(f"Loading {self.model_name}...")
             self.model = SentenceTransformer(self.model_name)
-            logger.info("✅ NLP model loaded")
+            logger.info("NLP model loaded")
         return self.model
     
     def train_on_tasks(self, tasks: List[Dict]):
@@ -113,7 +113,7 @@ class EnhancedNLPModel:
         Pre-compute embeddings for all tasks.
         Improves inference speed.
         """
-        logger.info(f"🔨 Training NLP model on {len(tasks)} tasks...")
+        logger.info(f"Training NLP model on {len(tasks)} tasks...")
         self.load_pretrained()
         
         for task in tasks:
@@ -124,7 +124,7 @@ class EnhancedNLPModel:
             embedding = self.model.encode([description], convert_to_numpy=True)[0]
             self.task_embeddings_cache[task_id] = embedding
         
-        logger.info(f"✅ Cached {len(self.task_embeddings_cache)} task embeddings")
+        logger.info(f"Cached {len(self.task_embeddings_cache)} task embeddings")
         return len(self.task_embeddings_cache)
     
     def cache_skills(self, developers: List[Dict]):
@@ -132,7 +132,7 @@ class EnhancedNLPModel:
         Pre-compute embeddings for all developer skills.
         Speeds up real-time recommendation.
         """
-        logger.info(f"🔨 Caching skill embeddings for {len(developers)} developers...")
+        logger.info(f"Caching skill embeddings for {len(developers)} developers...")
         self.load_pretrained()
         
         all_skills = set()
@@ -144,7 +144,7 @@ class EnhancedNLPModel:
             embedding = self.model.encode([skill], convert_to_numpy=True)[0]
             self.skill_embeddings[skill] = embedding
         
-        logger.info(f"✅ Cached {len(self.skill_embeddings)} skill embeddings")
+        logger.info(f"Cached {len(self.skill_embeddings)} skill embeddings")
         return len(self.skill_embeddings)
     
     def compute_task_dev_similarity(self, task_id: str, developer: Dict) -> float:
@@ -199,7 +199,7 @@ class EnhancedNLPModel:
         self.model_name = state.get('model_name', self.model_name)
         self.skill_embeddings = state.get('skill_embeddings', {})
         self.task_embeddings_cache = state.get('task_embeddings_cache', {})
-        logger.info(f"✅ Restored NLP model state")
+        logger.info(f"Restored NLP model state")
 
 
 class EnhancedCollabFilter:
@@ -227,7 +227,7 @@ class EnhancedCollabFilter:
             tasks: [{ id, description }]
             assignments: [{ developer_id, task_id, accepted }]
         """
-        logger.info(f"🔨 Training CF model on {len(assignments)} assignments...")
+        logger.info(f"Training CF model on {len(assignments)} assignments...")
         
         self.developers = {d['id']: d for d in developers}
         self.tasks = {t['id']: t for t in tasks}
@@ -261,7 +261,7 @@ class EnhancedCollabFilter:
         self.knn_model.fit(normalized_matrix)
         self.fitted = True
         
-        logger.info("✅ CF model trained")
+        logger.info("CF model trained")
         return True
     
     def predict(self, developer_id: str, task_id: str) -> float:
@@ -326,7 +326,7 @@ class EnhancedCollabFilter:
             self.knn_model = NearestNeighbors(n_neighbors=self.n_neighbors)
             self.knn_model.fit(normalized_matrix)
         
-        logger.info("✅ Restored CF model state")
+        logger.info("Restored CF model state")
 
 
 class RecommenderModelTrainer:
@@ -346,20 +346,20 @@ class RecommenderModelTrainer:
         Train complete recommendation pipeline.
         Returns training report and saves models.
         """
-        logger.info("🚀 Starting full training pipeline...")
+        logger.info("Starting full training pipeline...")
         start_time = datetime.now()
         
         # Train NLP model
-        logger.info("\n📊 Phase 1: Training NLP Model")
+        logger.info("\nPhase 1: Training NLP Model")
         nlp_tasks = self.nlp_model.train_on_tasks(tasks)
         nlp_skills = self.nlp_model.cache_skills(developers)
         
         # Train CF model
-        logger.info("\n📊 Phase 2: Training Collaborative Filter")
+        logger.info("\nPhase 2: Training Collaborative Filter")
         self.cf_model.train(developers, tasks, assignments)
         
         # Save models
-        logger.info("\n💾 Phase 3: Saving Models")
+        logger.info("\nPhase 3: Saving Models")
         nlp_state = self.nlp_model.get_state()
         cf_state = self.cf_model.get_state()
         
@@ -382,7 +382,7 @@ class RecommenderModelTrainer:
         
         self.persistence.save_metadata(metadata, 'recommender')
         
-        logger.info(f"\n✅ Training complete in {training_time:.1f}s")
+        logger.info(f"\nTraining complete in {training_time:.1f}s")
         logger.info(f"   Models saved to: {self.persistence.model_dir}")
         
         return {
@@ -429,5 +429,5 @@ if __name__ == "__main__":
     trainer = RecommenderModelTrainer()
     result = trainer.train_full_pipeline(developers, tasks, assignments)
     
-    print(f"\n📈 Training Report:")
+    print(f"\nTraining Report:")
     print(json.dumps(result['metadata'], indent=2))
